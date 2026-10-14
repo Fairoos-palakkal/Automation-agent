@@ -1,9 +1,9 @@
 # Agentic QA Command Center — Progress Report
 
 > **Last Updated:** 2026-10-14  
-> **Completed Phases:** Phase 0, Phase 1  
-> **Next Phase:** Phase 2 (Multi-Agent Architecture)  
-> **Test Status:** 70 unit tests passing, E2E passing, contract tests passing
+> **Completed Phases:** Phase 0, Phase 1, Phase 2  
+> **Next Phase:** Phase 3 (Challenger, Juice Shop, Polish)  
+> **Test Status:** 100 unit tests passing, 2 E2E passing, 2 contract tests passing
 
 ---
 
@@ -160,40 +160,99 @@ Phase 1 built the full single-agent exploration pipeline from tool gateway to HT
 
 ---
 
+## Phase 2 — Multi-Agent Architecture (Complete ✅)
+
+Phase 2 established the multi-agent split into Planner + Browser Agent + API Agent, isolated context execution (D6), bounded replanning (D2), and Own Site mock API backend with planted defects (D3).
+
+### 2.1 — Plan & Task Schema (Pydantic Models)
+
+| File | What it does |
+|---|---|
+| [`src/qa_cc/agents/plan.py`](file:///Users/fairoospalakkal/Desktop/Automation-agent/src/qa_cc/agents/plan.py) | `Plan`, `Task`, `AgentType` (BROWSER, API) Pydantic models. Validates required assignee, per-task budgets (`max_actions`, `max_tokens`), and serialization. |
+| [`tests/unit/test_plan_schema.py`](file:///Users/fairoospalakkal/Desktop/Automation-agent/tests/unit/test_plan_schema.py) | 5 tests: plan validation, missing assignee rejection, unknown assignee validation, task budget enforcement, trace serialization |
+
+### 2.2 — Planner Agent (Objective Decomposition + Replan Bounding)
+
+| File | What it does |
+|---|---|
+| [`src/qa_cc/agents/planner.py`](file:///Users/fairoospalakkal/Desktop/Automation-agent/src/qa_cc/agents/planner.py) | Decomposes Objectives into structured Plans. Has NO tool access. Supports bounded replanning on subagent failure/reports (max 2 replans). Automatically splits and bounds task budgets against total run budget. |
+| [`tests/unit/test_planner.py`](file:///Users/fairoospalakkal/Desktop/Automation-agent/tests/unit/test_planner.py) | 5 tests: plan generation, zero tool access verification, subagent report replan, max-replan enforcement, budget split bounding |
+
+### 2.3 — Browser Agent (Isolated Context + Step Recording)
+
+| File | What it does |
+|---|---|
+| [`src/qa_cc/agents/browser.py`](file:///Users/fairoospalakkal/Desktop/Automation-agent/src/qa_cc/agents/browser.py) | Executes browser tasks in isolation. Context contains only task goal and target (no prior history bloat). Tool set restricted to browser tools only. Returns `TaskResult` with recorded steps (no raw LLM transcripts per D6). |
+| [`tests/unit/test_browser_agent.py`](file:///Users/fairoospalakkal/Desktop/Automation-agent/tests/unit/test_browser_agent.py) | 5 tests: isolated context, browser tools only, findings with evidence, per-task budget exhaustion, step recording without transcript dump |
+
+### 2.4 — API Agent + HttpTool (Network Testing + Evidence)
+
+| File | What it does |
+|---|---|
+| [`src/qa_cc/tools/http.py`](file:///Users/fairoospalakkal/Desktop/Automation-agent/src/qa_cc/tools/http.py) | Safe HTTP client with request/response capture as `EvidenceType.NETWORK_REQUEST`. Enforces allowlist when called via `ToolGateway`. |
+| [`src/qa_cc/agents/api.py`](file:///Users/fairoospalakkal/Desktop/Automation-agent/src/qa_cc/agents/api.py) | Executes HTTP/REST tasks in isolation. Tool set restricted to `http_request` only. Enforces task budget. Emits `TaskResult`. |
+| [`tests/unit/test_api_agent.py`](file:///Users/fairoospalakkal/Desktop/Automation-agent/tests/unit/test_api_agent.py) | 5 tests: allowlist enforcement, HTTP Evidence recording, HTTP tools only, API defect findings, per-task budget exhaustion |
+
+### 2.5 — Multi-Agent Orchestrator
+
+| File | What it does |
+|---|---|
+| [`src/qa_cc/agents/orchestrator.py`](file:///Users/fairoospalakkal/Desktop/Automation-agent/src/qa_cc/agents/orchestrator.py) | Orchestrates Planner -> BrowserAgent + APIAgent. Runs each agent with its own budget. Aggregates findings and steps. Dispatches replan on task failure. Shares compact finding summaries only (D6). |
+| [`tests/unit/test_orchestrator.py`](file:///Users/fairoospalakkal/Desktop/Automation-agent/tests/unit/test_orchestrator.py) | 5 tests: planner-then-agents sequence, separate budgets, finding aggregation, shared findings without transcripts, replan flow on failure |
+
+### 2.6 — Own Site FastAPI Mock Backend (Planted Defects D3)
+
+| File | What it does |
+|---|---|
+| [`src/qa_cc/tools/mock_api.py`](file:///Users/fairoospalakkal/Desktop/Automation-agent/src/qa_cc/tools/mock_api.py) | FastAPI mock backend for Acme Store. Serves `/api/health`, `/api/cart`, `/api/contact`, `/api/cart/update`, `/api/cart/apply-promo`. Has planted API defects corresponding to ground truth (DEFECT-001, DEFECT-004, DEFECT-007). |
+| [`tests/unit/test_mock_api.py`](file:///Users/fairoospalakkal/Desktop/Automation-agent/tests/unit/test_mock_api.py) | 3 tests: endpoint serving, planted defect triggers, defect ID ground truth consistency |
+
+### 2.7 — CLI Multi-Agent & Comparative Scoring
+
+| File | What it does |
+|---|---|
+| [`src/qa_cc/cli.py`](file:///Users/fairoospalakkal/Desktop/Automation-agent/src/qa_cc/cli.py) | Added `--multi-agent` flag to `qa_cc run` and `--compare <dir>` to `qa_cc score` to evaluate baseline vs multi-agent side-by-side. |
+| [`tests/e2e/test_multi_agent_e2e.py`](file:///Users/fairoospalakkal/Desktop/Automation-agent/tests/e2e/test_multi_agent_e2e.py) | Phase 2 Gate E2E test: runs Planner + BrowserAgent (Playwright) + APIAgent (FastAPI backend) on Own Site, generates report, and scores against ground truth. |
+
+---
+
 ## Architecture Summary
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                      CLI (cli.py)                       │
-│  run --target URL --objective TEXT [--mock] [--max-N]   │
-│  score --run-dir DIR --ground-truth FILE                │
-└───────────────────────┬─────────────────────────────────┘
-                        │
-         ┌──────────────▼──────────────┐
-         │      BaselineAgent          │
-         │  (multi-turn LLM loop)      │
-         │  ┌────────────────────────┐ │
-         │  │ LoopDetector           │ │
-         │  │ (cycle-break FSM)      │ │
-         │  └────────────────────────┘ │
-         └──────┬─────────────┬────────┘
-                │             │
-    ┌───────────▼──┐   ┌──────▼──────┐
-    │  LLMClient   │   │ ToolGateway │
-    │  (token acct)│   │ (allowlist, │
-    │              │   │  scrub,     │
-    │  FakeProvider│   │  trace)     │
-    │  OpenAIComp. │   └──────┬──────┘
-    └──────────────┘          │
-                     ┌────────▼────────┐
-                     │  BrowserTools   │
-                     │  (navigate,     │
-                     │   click, fill,  │
-                     │   screenshot)   │
-                     │                 │
-                     │  Playwright     │
-                     │  PageDriver     │
-                     └─────────────────┘
+                      ┌────────────────────────────────────────┐
+                      │              CLI (cli.py)              │
+                      │  run [--multi-agent] [--mock]          │
+                      │  score --run-dir DIR [--compare DIR2]  │
+                      └──────────────────┬─────────────────────┘
+                                         │
+                 ┌───────────────────────┴──────────────────────┐
+                 │                                              │
+                 ▼ (Single Agent)                               ▼ (Multi-Agent)
+      ┌─────────────────────┐                      ┌────────────────────────────┐
+      │    BaselineAgent    │                      │        Orchestrator        │
+      └──────────┬──────────┘                      └──────────────┬─────────────┘
+                 │                                                │
+                 │                         ┌──────────────────────┼──────────────────────┐
+                 │                         ▼                      ▼                      ▼
+                 │                  ┌─────────────┐       ┌──────────────┐       ┌──────────────┐
+                 │                  │   Planner   │       │ BrowserAgent │       │   APIAgent   │
+                 │                  │ (no tools)  │       │(browser tools│       │ (HTTP tool)  │
+                 │                  └─────────────┘       └──────┬───────┘       └──────┬───────┘
+                 │                                               │                      │
+                 └───────────────────────────────┬───────────────┴──────────────────────┘
+                                                 │
+                                       ┌─────────▼─────────┐
+                                       │    ToolGateway    │
+                                       │ (allowlist, scrub,│
+                                       │   permissions)    │
+                                       └─────────┬─────────┘
+                                                 │
+                         ┌───────────────────────┴───────────────────────┐
+                         ▼                                               ▼
+               ┌───────────────────┐                           ┌───────────────────┐
+               │   BrowserTools    │                           │     HttpTool      │
+               │ (PlaywrightPage)  │                           │(FastAPI / REST)   │
+               └───────────────────┘                           └───────────────────┘
 
   Offline:
   ┌──────────────┐    ┌───────────────┐
@@ -209,10 +268,10 @@ Phase 1 built the full single-agent exploration pipeline from tool gateway to HT
 
 | Category | Tests | Status |
 |---|---|---|
-| Unit tests | 70 | ✅ All passing |
-| E2E (Playwright) | 1 | ✅ Passing |
+| Unit tests | 100 | ✅ All passing |
+| E2E (Playwright & Multi-Agent) | 2 | ✅ Passing |
 | Contract (B.AI live) | 2 | ✅ Passing |
-| **Total** | **73** | ✅ |
+| **Total** | **104** | ✅ |
 
 ---
 
@@ -225,32 +284,30 @@ source .venv/bin/activate
 # Unit tests (fast, no network)
 pytest tests/unit/ -v
 
-# E2E test (requires Playwright browsers)
+# E2E tests (requires Playwright browsers)
 pytest tests/e2e/ -v -m e2e
 
 # Contract tests (consumes real tokens)
 pytest tests/contract/ -v -m live
 
-# Run agent in mock mode
+# Run baseline agent in mock mode
 python -m qa_cc run --target http://localhost:3000 --objective "Sanity test" --mock
 
-# Run agent against live site
-python -m qa_cc run --target http://127.0.0.1:5500/index.html --objective "Explore and find bugs" --max-actions 10
+# Run multi-agent in mock mode
+python -m qa_cc run --target http://localhost:3000 --objective "Multi-agent test" --mock --multi-agent
 
-# Score findings
+# Score run findings
 python -m qa_cc score --run-dir ./run_output --ground-truth benchmark/ground_truth/defects.json
+
+# Compare baseline vs multi-agent runs
+python -m qa_cc score --run-dir ./baseline_run --compare ./multi_agent_run
 ```
 
 ---
 
-## Pre-Phase 2 Checklist
+## Phase Checklist
 
-- [x] `pytest tests/unit/ -v` → 70 passed
-- [x] `.env` has valid B.AI API key
-- [x] `pytest tests/contract/ -v -m live` → 2 passed
-- [x] `pytest tests/e2e/ -v -m e2e` → 1 passed
-- [x] `defects.json` has 5 tuning + 3 held-out defects
-- [x] All 6 benchmark HTML pages exist with planted bugs
-- [x] Agent code never imports `ground_truth` (AST-verified)
-- [x] VerdictEngine never imports `llm` (AST-verified)
-- [ ] **Phase 2:** Multi-Agent Architecture (Planner + Browser Agent + API Agent)
+- [x] **Phase 0:** Scaffolding, Seams, Ground Truth Freezing, Provider Spike
+- [x] **Phase 1:** Single-Agent Baseline Loop, Evidence, Verdict Engine, Report
+- [x] **Phase 2:** Multi-Agent Architecture (Plan schema, Planner, BrowserAgent, APIAgent, Orchestrator, Mock API)
+- [ ] **Phase 3:** Challenger, Juice Shop Integration, Prompt Injection Fixture, Polish
