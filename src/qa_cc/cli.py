@@ -6,10 +6,16 @@ import sys
 from typing import List, Optional
 
 from qa_cc.agents.baseline import BaselineAgent, RunResult
+from qa_cc.agents.plan import Plan, Task, AgentType
+from qa_cc.agents.planner import Planner
+from qa_cc.agents.browser import BrowserAgent
+from qa_cc.agents.api import APIAgent
+from qa_cc.agents.orchestrator import Orchestrator
 from qa_cc.gateway.gateway import ToolGateway, ToolDefinition
 from qa_cc.llm.client import LLMClient
 from qa_cc.llm.fake_provider import FakeProvider
 from qa_cc.report.generator import generate_report
+from qa_cc.tools.http import HttpTool
 from qa_cc.trace.run_state import RunState
 from qa_cc.trace.writer import TraceWriter
 from qa_cc.verdict.evidence import Evidence, EvidenceType, Finding
@@ -28,11 +34,13 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--objective", required=True, help="Natural language objective")
     run_parser.add_argument("--output-dir", default="./run_output", help="Directory for trace and reports")
     run_parser.add_argument("--mock", action="store_true", help="Use deterministic mock provider for testing")
+    run_parser.add_argument("--multi-agent", action="store_true", help="Run with Planner + BrowserAgent + APIAgent")
     run_parser.add_argument("--max-actions", type=int, default=25, help="Action budget limit")
 
     # Score subcommand
     score_parser = subparsers.add_parser("score", help="Score findings from a completed run against ground truth")
     score_parser.add_argument("--run-dir", required=True, help="Directory containing run artifacts")
+    score_parser.add_argument("--compare", help="Second run directory for comparative evaluation")
     score_parser.add_argument("--ground-truth", default="benchmark/ground_truth/defects.json", help="Path to ground truth defects.json")
     score_parser.add_argument("--include-held-out", action="store_true", help="Include held-out evaluation defects")
 
@@ -53,56 +61,169 @@ def handle_run(args: argparse.Namespace) -> int:
     playwright_ctx = None
 
     if args.mock:
-        # Scripted canned responses for mock mode
-        canned = [
-            {
-                "id": "canned-1",
-                "model": "fake-canned",
-                "choices": [
+        if args.multi_agent:
+            # Scripted providers for multi-agent mock run
+            planner_plan = {
+                "objective": args.objective,
+                "tasks": [
                     {
+                        "id": "task-b",
+                        "goal": "Mock browser exploration",
+                        "assignee": "browser",
+                        "budget": {"max_actions": 5, "max_tokens": 5000},
+                    },
+                    {
+                        "id": "task-a",
+                        "goal": "Mock API testing",
+                        "assignee": "api",
+                        "budget": {"max_actions": 5, "max_tokens": 5000},
+                    },
+                ],
+            }
+            planner_client = LLMClient(provider=FakeProvider(responses=[{
+                "id": "pl-1",
+                "model": "fake-planner",
+                "choices": [{"message": {"role": "assistant", "content": json.dumps(planner_plan)}}],
+            }]))
+            planner = Planner(llm_client=planner_client)
+
+            browser_client = LLMClient(provider=FakeProvider(responses=[
+                {
+                    "id": "b-1",
+                    "model": "fake-browser",
+                    "choices": [{
                         "message": {
                             "role": "assistant",
-                            "tool_calls": [
-                                {
-                                    "id": "c1",
-                                    "type": "function",
-                                    "function": {
-                                        "name": "report_finding",
-                                        "arguments": {
-                                            "summary": "Mock verification finding",
-                                            "evidence_type": "dom_snapshot",
-                                            "evidence_content": "<div>Mock element</div>",
-                                        },
+                            "tool_calls": [{
+                                "id": "tc-b",
+                                "type": "function",
+                                "function": {
+                                    "name": "report_finding",
+                                    "arguments": {
+                                        "summary": "Mock UI defect found",
+                                        "evidence_type": "dom_snapshot",
+                                        "evidence_content": "<button>Error</button>",
                                     },
-                                }
-                            ],
+                                },
+                            }],
                         }
-                    }
-                ],
-                "usage": {"prompt_tokens": 10, "completion_tokens": 10, "total_tokens": 20},
-            },
-            {
-                "id": "canned-2",
-                "model": "fake-canned",
-                "choices": [
-                    {
+                    }],
+                },
+                {
+                    "id": "b-2",
+                    "model": "fake-browser",
+                    "choices": [{
                         "message": {
                             "role": "assistant",
-                            "tool_calls": [
-                                {
-                                    "id": "c2",
-                                    "type": "function",
-                                    "function": {"name": "finish", "arguments": {"summary": "Done"}},
-                                }
-                            ],
+                            "tool_calls": [{
+                                "id": "tc-b2",
+                                "type": "function",
+                                "function": {"name": "finish", "arguments": {"summary": "Browser finished"}},
+                            }],
                         }
-                    }
-                ],
-                "usage": {"prompt_tokens": 5, "completion_tokens": 5, "total_tokens": 10},
-            },
-        ]
-        provider = FakeProvider(responses=canned)
-        client = LLMClient(provider=provider)
+                    }],
+                },
+            ]))
+
+            api_client = LLMClient(provider=FakeProvider(responses=[
+                {
+                    "id": "a-1",
+                    "model": "fake-api",
+                    "choices": [{
+                        "message": {
+                            "role": "assistant",
+                            "tool_calls": [{
+                                "id": "tc-a",
+                                "type": "function",
+                                "function": {
+                                    "name": "report_finding",
+                                    "arguments": {
+                                        "summary": "Mock API defect found",
+                                        "evidence_type": "network_request",
+                                        "evidence_content": "500 Internal Error",
+                                    },
+                                },
+                            }],
+                        }
+                    }],
+                },
+                {
+                    "id": "a-2",
+                    "model": "fake-api",
+                    "choices": [{
+                        "message": {
+                            "role": "assistant",
+                            "tool_calls": [{
+                                "id": "tc-a2",
+                                "type": "function",
+                                "function": {"name": "finish", "arguments": {"summary": "API finished"}},
+                            }],
+                        }
+                    }],
+                },
+            ]))
+
+            browser_agent = BrowserAgent(llm_client=browser_client, gateway=gateway, trace_writer=trace_writer)
+            api_agent = APIAgent(llm_client=api_client, gateway=gateway, trace_writer=trace_writer)
+
+            orchestrator = Orchestrator(
+                planner=planner,
+                browser_agent=browser_agent,
+                api_agent=api_agent,
+                trace_writer=trace_writer,
+                run_state=run_state,
+            )
+            result = orchestrator.run(objective=args.objective, target=args.target)
+        else:
+            # Baseline single-agent mock
+            canned = [
+                {
+                    "id": "canned-1",
+                    "model": "fake-canned",
+                    "choices": [{
+                        "message": {
+                            "role": "assistant",
+                            "tool_calls": [{
+                                "id": "c1",
+                                "type": "function",
+                                "function": {
+                                    "name": "report_finding",
+                                    "arguments": {
+                                        "summary": "Mock verification finding",
+                                        "evidence_type": "dom_snapshot",
+                                        "evidence_content": "<div>Mock element</div>",
+                                    },
+                                },
+                            }],
+                        }
+                    }],
+                    "usage": {"prompt_tokens": 10, "completion_tokens": 10, "total_tokens": 20},
+                },
+                {
+                    "id": "canned-2",
+                    "model": "fake-canned",
+                    "choices": [{
+                        "message": {
+                            "role": "assistant",
+                            "tool_calls": [{
+                                "id": "c2",
+                                "type": "function",
+                                "function": {"name": "finish", "arguments": {"summary": "Done"}},
+                            }],
+                        }
+                    }],
+                    "usage": {"prompt_tokens": 5, "completion_tokens": 5, "total_tokens": 10},
+                },
+            ]
+            provider = FakeProvider(responses=canned)
+            client = LLMClient(provider=provider)
+            agent = BaselineAgent(
+                llm_client=client,
+                gateway=gateway,
+                run_state=run_state,
+                trace_writer=trace_writer,
+            )
+            result = agent.run(objective=args.objective, target=args.target)
     else:
         api_key = os.environ.get("LLM_API_KEY", "")
         if api_key and api_key != "your_api_key_here":
@@ -156,13 +277,36 @@ def handle_run(args: argparse.Namespace) -> int:
         except Exception as e:
             print(f"Note: Running without live browser ({e})")
 
-    agent = BaselineAgent(
-        llm_client=client,
-        gateway=gateway,
-        run_state=run_state,
-        trace_writer=trace_writer,
-    )
-    result = agent.run(objective=args.objective, target=args.target)
+        # Wire HTTP tool
+        http_tool = HttpTool()
+        gateway.register_tool(
+            ToolDefinition(
+                name="http_request",
+                handler=http_tool.request,
+                is_url_action=True,
+            )
+        )
+
+        if args.multi_agent:
+            planner = Planner(llm_client=client)
+            browser_agent = BrowserAgent(llm_client=client, gateway=gateway, trace_writer=trace_writer)
+            api_agent = APIAgent(llm_client=client, gateway=gateway, trace_writer=trace_writer)
+            orchestrator = Orchestrator(
+                planner=planner,
+                browser_agent=browser_agent,
+                api_agent=api_agent,
+                trace_writer=trace_writer,
+                run_state=run_state,
+            )
+            result = orchestrator.run(objective=args.objective, target=args.target)
+        else:
+            agent = BaselineAgent(
+                llm_client=client,
+                gateway=gateway,
+                run_state=run_state,
+                trace_writer=trace_writer,
+            )
+            result = agent.run(objective=args.objective, target=args.target)
 
     if browser_instance:
         browser_instance.close()
@@ -198,6 +342,34 @@ def handle_score(args: argparse.Namespace) -> int:
     findings = [Finding.model_validate(rf) for rf in raw_findings]
     harness = ScoringHarness(args.ground_truth)
     report = harness.score(findings=findings, include_held_out=args.include_held_out)
+
+    if args.compare:
+        comp_dir = Path(args.compare)
+        comp_findings_path = comp_dir / "findings.json"
+        if not comp_findings_path.exists():
+            print(f"Error: {comp_findings_path} does not exist in comparison run directory.", file=sys.stderr)
+            return 1
+
+        with open(comp_findings_path, "r", encoding="utf-8") as f:
+            comp_raw = json.load(f)
+        comp_findings = [Finding.model_validate(rf) for rf in comp_raw]
+        report2 = harness.score(findings=comp_findings, include_held_out=args.include_held_out)
+
+        print("\n================== RUN COMPARISON ==================")
+        print(f"Ground Truth: {args.ground_truth}")
+        print(f"Scope: {'All (including held-out)' if args.include_held_out else 'Tuning Set Only'}")
+        print("-" * 52)
+        print(f"{'Metric':<25} | {'Run 1 (Baseline)':<12} | {'Run 2 (Multi-Agent)':<12}")
+        print("-" * 52)
+        print(f"{'Total Findings':<25} | {len(findings):<12} | {len(comp_findings):<12}")
+        print(f"{'Matched Defects':<25} | {len(report.matched_defects):<12} | {len(report2.matched_defects):<12}")
+        print(f"{'Recall':<25} | {report.recall*100:>11.1f}% | {report2.recall*100:>11.1f}%")
+        print(f"{'Unmatched Findings':<25} | {len(report.unmatched_findings):<12} | {len(report2.unmatched_findings):<12}")
+        print("-" * 52)
+        print(f"Run 1 Matched: {sorted(list(report.matched_defects))}")
+        print(f"Run 2 Matched: {sorted(list(report2.matched_defects))}")
+        print("====================================================")
+        return 0
 
     print("================ SCORING REPORT ================")
     print(f"Ground Truth File: {args.ground_truth}")
