@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "qa_cc"
+version = "0.1.0"
+description = "Agentic QA Command Center"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.0",
+    "openai>=1.0",
+    "playwright>=1.40",
+    "httpx>=0.25",
+    "fastapi>=0.104",
+    "uvicorn>=0.24",
+    "click>=8.0",
+    "beautifulsoup4>=4.12",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4",
+    "pytest-asyncio>=0.21",
+    "pytest-mock>=3.12",
+]
+
+[project.scripts]
+qa-cc = "qa_cc.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+asyncio_mode = "auto"
+markers = [
+    "e2e: end-to-end tests requiring a real browser (excluded from default run)",
+    "live: tests that call real LLM providers and consume tokens (excluded from default run)",
+]
+addopts = "-m 'not e2e and not live'"

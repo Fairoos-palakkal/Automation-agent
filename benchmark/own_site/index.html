@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Acme Test App - Home</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 0; color: #333; }
+        nav { background: #1a1a2e; padding: 1rem 2rem; display: flex; gap: 1.5rem; align-items: center; }
+        nav a { color: #fff; text-decoration: none; font-weight: 500; }
+        nav a:hover { color: #4ecca3; }
+        .hero { padding: 4rem 2rem; text-align: center; background: #eef2f5; }
+        .hero h1 { font-size: 2.5rem; margin-bottom: 1rem; color: #162447; }
+        .subscribe-box { margin-top: 2rem; display: inline-flex; gap: 0.5rem; }
+        input[type="email"] { padding: 0.6rem; border: 1px solid #ccc; border-radius: 4px; font-size: 1rem; }
+        /* Defect-005: Icon button with no text, aria-label or accessible name */
+        .icon-btn { background: #e43f5a; border: none; padding: 0.6rem 1rem; border-radius: 4px; cursor: pointer; color: white; }
+    </style>
+</head>
+<body>
+    <nav>
+        <a href="index.html"><strong>Acme QA</strong></a>
+        <a href="catalog.html">Catalog</a>
+        <a href="cart.html">Cart</a>
+        <!-- Defect-002: Broken link pointing to pricing-old.html -->
+        <a href="pricing-old.html" id="nav-pricing">Pricing</a>
+        <a href="contact.html">Contact</a>
+        <a href="account.html">Account</a>
+    </nav>
+    <div class="hero">
+        <h1>Welcome to Acme Store</h1>
+        <p>Reliable products for reliable testing.</p>
+        <div class="subscribe-box">
+            <input type="email" id="newsletter-email" placeholder="Enter your email...">
+            <!-- Defect-005: Button has no accessible text or aria-label -->
+            <button id="subscribe-btn" class="icon-btn"><span>&rarr;</span></button>
+        </div>
+    </div>
+</body>
+</html>

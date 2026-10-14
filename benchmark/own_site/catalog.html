@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Acme Test App - Catalog</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 0; }
+        nav { background: #1a1a2e; padding: 1rem 2rem; display: flex; gap: 1.5rem; }
+        nav a { color: #fff; text-decoration: none; }
+        .content { padding: 2rem; max-width: 800px; margin: auto; }
+        .controls { margin-bottom: 1.5rem; display: flex; gap: 1rem; }
+        button { padding: 0.5rem 1rem; cursor: pointer; }
+        .product-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; }
+        .product-card { border: 1px solid #ddd; padding: 1rem; border-radius: 4px; }
+    </style>
+</head>
+<body>
+    <nav>
+        <a href="index.html"><strong>Acme QA</strong></a>
+        <a href="catalog.html">Catalog</a>
+        <a href="cart.html">Cart</a>
+    </nav>
+    <div class="content">
+        <h2>Product Catalog</h2>
+        <div class="controls">
+            <!-- Defect-003: Clicking this button causes TypeError -->
+            <button id="filter-btn">Filter by Category</button>
+        </div>
+        <div class="product-grid" id="product-list">
+            <div class="product-card">
+                <h3>Widget A</h3>
+                <p>Price: $19.99</p>
+            </div>
+            <div class="product-card">
+                <h3>Widget B</h3>
+                <p>Price: $29.99</p>
+            </div>
+        </div>
+    </div>
+    <script>
+        var inventoryData = undefined; // Intentionally undefined
+        document.getElementById('filter-btn').addEventListener('click', function() {
+            // Defect-003: Throws TypeError: Cannot read properties of undefined (reading 'filter')
+            var filtered = inventoryData.filter(function(item) {
+                return item.active;
+            });
+            console.log(filtered);
+        });
+    </script>
+</body>
+</html>

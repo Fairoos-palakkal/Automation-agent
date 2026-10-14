@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Acme Test App - Contact</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 0; color: #333; }
+        nav { background: #1a1a2e; padding: 1rem 2rem; display: flex; gap: 1.5rem; align-items: center; }
+        nav a { color: #fff; text-decoration: none; }
+        .container { max-width: 600px; margin: 2rem auto; padding: 1rem; }
+        .form-group { margin-bottom: 1rem; }
+        label { display: block; margin-bottom: 0.5rem; font-weight: bold; }
+        input[type="text"], textarea { width: 100%; padding: 0.5rem; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        button { background: #1f4068; color: white; padding: 0.7rem 1.5rem; border: none; border-radius: 4px; cursor: pointer; }
+        .success { color: green; display: none; margin-top: 1rem; }
+    </style>
+</head>
+<body>
+    <nav>
+        <a href="index.html"><strong>Acme QA</strong></a>
+        <a href="catalog.html">Catalog</a>
+        <a href="cart.html">Cart</a>
+        <a href="contact.html">Contact</a>
+    </nav>
+    <div class="container">
+        <h2>Contact Support</h2>
+        <form id="contact-form">
+            <div class="form-group">
+                <label for="name">Name:</label>
+                <input type="text" id="name" required>
+            </div>
+            <div class="form-group">
+                <label for="email">Email Address:</label>
+                <!-- Defect-001: type='text' without email format validation or pattern, accepts arbitrary string -->
+                <input type="text" id="email" name="email">
+                <div id="email-error" style="display: none; color: red;">Please enter a valid email</div>
+            </div>
+            <div class="form-group">
+                <label for="message">Message:</label>
+                <textarea id="message" rows="4"></textarea>
+            </div>
+            <button type="submit" id="submit-contact">Send Message</button>
+        </form>
+        <div id="contact-success" class="success">Message sent successfully!</div>
+    </div>
+    <script>
+        document.getElementById('contact-form').addEventListener('submit', function(e) {
+            e.preventDefault();
+            // Defect-001: No email format check is executed, always shows success and never displays #email-error
+            document.getElementById('contact-success').style.display = 'block';
+        });
+    </script>
+</body>
+</html>

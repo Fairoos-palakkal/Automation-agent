@@ -1,0 +1,120 @@
+[
+  {
+    "id": "DEFECT-001",
+    "name": "Missing email validation on contact form",
+    "category": "form_validation",
+    "set": "tuning",
+    "page": "/contact.html",
+    "description": "Submitting the contact form with an invalid email address succeeds without showing an error message.",
+    "matcher": {
+      "type": "element_text_missing",
+      "target_url": "/contact.html",
+      "element_selector": "#email-error",
+      "trigger_action": "submit_form",
+      "expected_condition": "Error message #email-error is displayed"
+    }
+  },
+  {
+    "id": "DEFECT-002",
+    "name": "Broken navigation link in navbar",
+    "category": "broken_navigation",
+    "set": "tuning",
+    "page": "/index.html",
+    "description": "The 'Pricing' link in the top navigation bar links to /pricing-old.html which returns 404.",
+    "matcher": {
+      "type": "link_broken",
+      "target_url": "/index.html",
+      "element_selector": "a[href='pricing-old.html']",
+      "expected_condition": "Link target returns 404 Not Found"
+    }
+  },
+  {
+    "id": "DEFECT-003",
+    "name": "Unhandled TypeError on catalog filter",
+    "category": "console_error",
+    "set": "tuning",
+    "page": "/catalog.html",
+    "description": "Clicking the 'Filter by Category' button causes an unhandled TypeError in the browser console.",
+    "matcher": {
+      "type": "console_error_pattern",
+      "target_url": "/catalog.html",
+      "element_selector": "#filter-btn",
+      "pattern": "TypeError.*Cannot read properties of undefined",
+      "expected_condition": "Console contains uncaught TypeError"
+    }
+  },
+  {
+    "id": "DEFECT-004",
+    "name": "Cart quantity allows negative values",
+    "category": "state_logic",
+    "set": "tuning",
+    "page": "/cart.html",
+    "description": "Clicking the decrement button when quantity is 1 sets quantity to -1 and produces negative total price.",
+    "matcher": {
+      "type": "element_value",
+      "target_url": "/cart.html",
+      "element_selector": "#cart-total",
+      "condition": "negative_value",
+      "expected_condition": "Cart total is less than 0"
+    }
+  },
+  {
+    "id": "DEFECT-005",
+    "name": "Missing accessible name on submit button",
+    "category": "accessibility",
+    "set": "tuning",
+    "page": "/index.html",
+    "description": "The primary newsletter subscribe button is an icon button without an aria-label or accessible text.",
+    "matcher": {
+      "type": "accessibility_attribute_missing",
+      "target_url": "/index.html",
+      "element_selector": "#subscribe-btn",
+      "attribute": "aria-label",
+      "expected_condition": "Interactive button has no accessible text or aria-label"
+    }
+  },
+  {
+    "id": "DEFECT-006",
+    "name": "Modal overlay intercepts checkout button click",
+    "category": "visual_layout",
+    "set": "held_out",
+    "page": "/checkout.html",
+    "description": "An invisible overlay with high z-index covers the 'Place Order' button preventing click events.",
+    "matcher": {
+      "type": "element_unclickable",
+      "target_url": "/checkout.html",
+      "element_selector": "#place-order-btn",
+      "expected_condition": "Button click intercepted by overlay"
+    }
+  },
+  {
+    "id": "DEFECT-007",
+    "name": "Repeated promo code application produces negative balance",
+    "category": "state_logic",
+    "set": "held_out",
+    "page": "/cart.html",
+    "description": "Applying promo code SAVE20 multiple times continuously deducts discount without checking if already applied.",
+    "matcher": {
+      "type": "element_value",
+      "target_url": "/cart.html",
+      "element_selector": "#total-amount",
+      "condition": "negative_value",
+      "expected_condition": "Total amount is negative after reapplying promo code"
+    }
+  },
+  {
+    "id": "DEFECT-008",
+    "name": "Logout button unhandled promise rejection in console",
+    "category": "broken_navigation",
+    "set": "held_out",
+    "page": "/account.html",
+    "description": "Clicking the logout button fails to navigate and throws an unhandled Promise rejection in console.",
+    "matcher": {
+      "type": "console_error_pattern",
+      "target_url": "/account.html",
+      "element_selector": "#logout-btn",
+      "pattern": "UnhandledPromiseRejection",
+      "expected_condition": "Console logs unhandled promise rejection on logout"
+    }
+  }
+]

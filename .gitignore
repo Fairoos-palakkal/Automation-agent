@@ -1,0 +1,25 @@
+# Environments & secrets
+.env
+*.env
+.venv/
+env/
+venv/
+
+# Python cache & build
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+
+# Testing & caches
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local run outputs & artifacts
+run_output/
+demo_run/
+noshery_run/
+artifacts/*.png
