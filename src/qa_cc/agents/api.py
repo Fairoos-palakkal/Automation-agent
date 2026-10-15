@@ -100,9 +100,24 @@ class APIAgent:
 
         system_prompt = (
             "You are an isolated API QA Agent. Your mission is to accomplish the assigned Task goal "
-            "using the http_request tool. Test endpoints for bugs, validation issues, or server errors. "
-            "Detect defects, report findings with evidence, and conclude with finish. "
-            "Stay strictly within the scope of your assigned task."
+            "using the http_request tool. Test endpoints for bugs, validation issues, security flaws, or server errors.\n\n"
+            "Guidelines for API Testing & Defect Detection:\n"
+            "1. Endpoint Discovery: Web SPAs communicate with REST APIs under '/rest/...' and '/api/...'. "
+            "Probe key functional endpoints relevant to your task:\n"
+            "   - Authentication: POST /rest/user/login (with JSON body), /api/Users, /rest/user/whoami\n"
+            "   - Search & Data: GET /rest/products/search?q=... , /api/Products, /api/Challenges\n"
+            "   - User State: /rest/basket/..., /api/BasketItems, /rest/saveLoginIp\n"
+            "2. Injection & Robustness Probing:\n"
+            "   - SQL Injection in Login: Test POST /rest/user/login with {\"email\": \"' or 1=1--\", \"password\": \"x\"}. "
+            "If it returns HTTP 200 with an auth token, report this critical SQL injection / auth bypass immediately!\n"
+            "   - Search Query Vulnerabilities: Test GET /rest/products/search?q=apple'-- or q=' union select ... . "
+            "If it returns HTTP 500, leaks internal database errors ('SQLITE_ERROR', stack trace), report it immediately!\n"
+            "   - Boundary & Error Conditions: Send empty bodies, invalid types, or malformed JSON to endpoints and verify "
+            "if the server responds with clean 4xx errors or unhandled 500 crashes.\n"
+            "3. Immediate Reporting: Whenever you detect an unexpected 200 (auth bypass), 500 Internal Server Error, "
+            "SQL error leak, or missing authorization, IMMEDIATELY call report_finding with evidence_type='network_request' "
+            "and evidence_content containing the request method, URL, status code, and response body before finishing.\n"
+            "4. Stay strictly within the scope of your assigned task, and call finish when done."
         )
 
         messages = [

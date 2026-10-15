@@ -76,13 +76,13 @@ class ToolGateway:
         return False
 
     def _scrub_obj(self, obj: Any) -> Any:
-        if not self.secret_keys:
-            return obj
-        secrets = [os.environ.get(k) for k in self.secret_keys if os.environ.get(k)]
-        if not secrets:
-            return obj
+        secrets = [os.environ.get(k) for k in self.secret_keys if os.environ.get(k)] if self.secret_keys else []
 
         def _scrub_val(val: Any) -> Any:
+            if hasattr(val, "model_dump") and callable(val.model_dump):
+                val = val.model_dump()
+            elif hasattr(val, "dict") and callable(val.dict):
+                val = val.dict()
             if isinstance(val, str):
                 s = val
                 for sec in secrets:

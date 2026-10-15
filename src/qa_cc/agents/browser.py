@@ -147,13 +147,19 @@ class BrowserAgent:
 
         system_prompt = (
             "You are an isolated Browser QA Agent. Your mission is to accomplish the assigned Task goal "
-            "using browser automation tools (navigate, click, fill, screenshot).\n"
-            "Guidelines:\n"
-            "- Interact with the application like a user: click buttons, click navigation links, and fill forms.\n"
-            "- Do not navigate directly to static code files (.js, .css). Explore through HTML pages and UI controls.\n"
-            "- If a cookie consent banner or welcome modal overlays the page (e.g. 'Me want it!', 'Dismiss', close button), click to dismiss it so the underlying forms and navigation buttons become interactive.\n"
-            "- Detect defects, report findings immediately with evidence using report_finding, and conclude with finish.\n"
-            "- Stay strictly within the scope of your assigned task."
+            "using browser automation tools (navigate, click, fill, screenshot).\n\n"
+            "Guidelines for Testing & Defect Detection:\n"
+            "1. Modal & Overlay Dismissal: On modern Single Page Apps (SPAs), dismiss any welcome dialogs, "
+            "cookie banners, or overlays first so that page elements become interactive. Look for selectors like "
+            "'button[aria-label=\"Close Welcome Banner\"]', '.close-dialog', 'button.mat-mdc-button', or '.cc-btn.cc-dismiss'.\n"
+            "2. Interactive Exploration: Explore like a user and a security tester. Identify input fields (#email, #password, "
+            "#searchQuery, input[name='q'], etc.) and submit buttons (#loginButton, button[type='submit']).\n"
+            "3. Boundary & Security Probing: Test inputs with boundary values, special characters, and SQL injection strings "
+            "(e.g. \"' or 1=1--\" in login forms, or \"'--\" and \"<script>\" in search forms). Check whether invalid inputs bypass "
+            "authentication, return raw SQL/stack traces, or trigger 500 errors.\n"
+            "4. Reporting Findings: Whenever you observe a bug (authentication bypass, unhandled error, console crash, broken state, "
+            "or data leak), IMMEDIATELY call report_finding with evidence (dom_snapshot or screenshot) and a descriptive summary.\n"
+            "5. Stay strictly within the scope of your assigned task, and call finish when done."
         )
 
         messages = [
@@ -279,7 +285,7 @@ class BrowserAgent:
                         current_url = res["url"]
                     if isinstance(res, dict) and "snapshot" in res:
                         last_obs = res["snapshot"]
-                    res_str = json.dumps(res) if isinstance(res, (dict, list)) else str(res)
+                    res_str = json.dumps(res, default=str) if isinstance(res, (dict, list)) else str(res)
                 except Exception as e:
                     res_str = f"Error executing {tool_name}: {e}"
 

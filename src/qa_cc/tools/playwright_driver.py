@@ -16,11 +16,11 @@ class PlaywrightPageDriver:
     def goto(self, url: str) -> Any:
         return self._page.goto(url)
 
-    def click(self, selector: str) -> Any:
-        return self._page.click(selector)
+    def click(self, selector: str, timeout: float = 5000) -> Any:
+        return self._page.click(selector, timeout=timeout)
 
-    def fill(self, selector: str, value: str) -> Any:
-        return self._page.fill(selector, value)
+    def fill(self, selector: str, value: str, timeout: float = 5000) -> Any:
+        return self._page.fill(selector, value, timeout=timeout)
 
     def screenshot(self, path: str) -> str:
         self._page.screenshot(path=path)

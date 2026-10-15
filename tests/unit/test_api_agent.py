@@ -157,3 +157,44 @@ class TestApiAgentAndHttpTool:
 
         assert result.budget_exceeded is True
         assert result.actions_count == 2
+
+    def test_api_agent_http_request_with_tracewriter_serializes_evidence(self, tmp_path):
+        """HTTP tool returning Evidence does not crash ToolGateway or TraceWriter serialization."""
+        from qa_cc.trace.writer import TraceWriter
+
+        trace_file = tmp_path / "trace.jsonl"
+        trace_writer = TraceWriter(trace_file)
+
+        class MockResp:
+            status_code = 200
+            text = '{"status":"ok"}'
+            headers = {"content-type": "application/json"}
+
+        http_tool = HttpTool(requester=lambda **kwargs: MockResp())
+        gateway = ToolGateway(trace_writer=trace_writer)
+        gateway.register_tool(ToolDefinition(
+            name="http_request",
+            handler=http_tool.request,
+            is_url_action=True,
+        ))
+
+        provider = FakeProvider(responses=[
+            make_tool_response("http_request", {"method": "GET", "url": "http://localhost:3000/api/status"}),
+            make_tool_response("finish", {"summary": "Done"}),
+        ])
+        client = LLMClient(provider=provider)
+        agent = APIAgent(llm_client=client, gateway=gateway, trace_writer=trace_writer)
+        task = Task(
+            id="task-test-serialize",
+            goal="Test serialization",
+            assignee=AgentType.API,
+            budget={"max_actions": 5, "max_tokens": 5000},
+        )
+
+        result = agent.execute(task, base_url="http://localhost:3000")
+        assert result.status == "completed"
+        entries = trace_writer.read_entries()
+        tool_entries = [e for e in entries if e.get("type") == "tool_call"]
+        assert len(tool_entries) == 1
+        assert tool_entries[0]["tool_name"] == "http_request"
+        assert tool_entries[0]["result"]["status_code"] == 200

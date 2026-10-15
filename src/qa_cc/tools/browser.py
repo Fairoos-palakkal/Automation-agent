@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional
 from qa_cc.verdict.evidence import Evidence, EvidenceType
 
 
-def compact_snapshot(html: str, max_chars: int = 8000) -> str:
+def compact_snapshot(html: str, max_chars: int = 25000) -> str:
     """Compact raw HTML into a clean, token-efficient representation for agent consumption."""
     # Strip head tags (meta, links, preconnects, stylesheets)
     cleaned = re.sub(r"<head[\s\S]*?</head>", "", html, flags=re.IGNORECASE)
@@ -17,6 +17,11 @@ def compact_snapshot(html: str, max_chars: int = 8000) -> str:
     cleaned = re.sub(r"<svg[\s\S]*?</svg>", "", cleaned, flags=re.IGNORECASE)
     # Strip comments
     cleaned = re.sub(r"<!--[\s\S]*?-->", "", cleaned)
+    # Strip framework / noise attributes (Angular internals, ripples, empty attrs)
+    cleaned = re.sub(r"(_ngcontent|_nghost)[^= \"\x27>]*(=[\"\x27][^\"]*[\"\x27])?", "", cleaned)
+    cleaned = re.sub(r"mat-ripple-loader-[^= \"\x27>]*(=[\"\x27][^\"]*[\"\x27])?", "", cleaned)
+    cleaned = re.sub(r"aria-hidden=\"true\"", "", cleaned)
+    cleaned = re.sub(r"style=\"\"", "", cleaned)
     # Normalize multiple whitespace characters
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
 

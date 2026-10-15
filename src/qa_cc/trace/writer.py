@@ -48,7 +48,7 @@ class TraceWriter:
         stamped = {"timestamp": self._now_iso(), **entry}
         scrubbed = self._scrub(stamped)
         with self._path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(scrubbed) + "\n")
+            fh.write(json.dumps(scrubbed, default=str) + "\n")
 
     def record_tool_call(
         self,
@@ -90,8 +90,18 @@ class TraceWriter:
 
     def _scrub(self, obj: Any) -> Any:
         """Recursively replace secret values with the scrub placeholder."""
+        if hasattr(obj, "model_dump") and callable(obj.model_dump):
+            obj = obj.model_dump()
+        elif hasattr(obj, "dict") and callable(obj.dict):
+            obj = obj.dict()
+
         if not self._secret_values:
+            if isinstance(obj, dict):
+                return {k: self._scrub(v) for k, v in obj.items()}
+            if isinstance(obj, list):
+                return [self._scrub(item) for item in obj]
             return obj
+
         if isinstance(obj, str):
             result = obj
             for secret in self._secret_values:

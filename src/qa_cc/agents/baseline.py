@@ -267,7 +267,7 @@ class BaselineAgent:
                         current_url = res["url"]
                     if isinstance(res, dict) and "snapshot" in res:
                         last_obs = res["snapshot"]
-                    res_str = json.dumps(res) if isinstance(res, (dict, list)) else str(res)
+                    res_str = json.dumps(res, default=str) if isinstance(res, (dict, list)) else str(res)
                 except Exception as e:
                     res_str = f"Error executing {tool_name}: {e}"
 

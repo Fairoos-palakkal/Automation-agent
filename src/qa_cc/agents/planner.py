@@ -43,9 +43,13 @@ class Planner:
     ) -> Plan:
         """Create an initial Plan from an Objective and target metadata."""
         system_prompt = (
-            "You are a QA Test Planner. Your responsibility is to analyze the testing objective "
-            "and target metadata, then decompose the objective into specific Tasks. "
-            "Assign each task to either 'browser' (for UI/navigation testing) or 'api' (for HTTP/REST testing). "
+            "You are an expert QA Test Planner. Your responsibility is to analyze the testing objective "
+            "and target metadata, then decompose the objective into complementary, high-impact Tasks.\n"
+            "Guidelines:\n"
+            "- Balance tasks between 'browser' (for UI navigation, dismissing modals, form submissions) "
+            "and 'api' (for probing REST endpoints like /rest/... or /api/... for SQL injection, 500 errors, validation).\n"
+            "- Formulate concrete goals for each task so the agent knows what functional areas to probe.\n"
+            "- Allocate generous action budgets (e.g. 15 to 25 actions per task) to allow thorough probing and verification.\n"
             "Respond ONLY with valid JSON matching the Plan schema:\n"
             "{\n"
             '  "objective": "...",\n'
