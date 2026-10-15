@@ -37,6 +37,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--mock", action="store_true", help="Use deterministic mock provider for testing")
     run_parser.add_argument("--multi-agent", action="store_true", help="Run with Planner + BrowserAgent + APIAgent")
     run_parser.add_argument("--max-actions", type=int, default=25, help="Action budget limit")
+    run_parser.add_argument("--max-tokens", type=int, default=250_000, help="Total token budget limit across run")
     run_parser.add_argument("--allowlist", nargs="*", default=[], help="Additional allowed hostnames for tool access")
 
     # Score subcommand
@@ -61,7 +62,7 @@ def handle_run(args: argparse.Namespace) -> int:
     report_path = out_dir / "report.html"
 
     trace_writer = TraceWriter(trace_path)
-    run_state = RunState(max_actions=args.max_actions)
+    run_state = RunState(max_actions=args.max_actions, max_tokens=args.max_tokens)
 
     target_parsed = urlparse(args.target)
     allowlist = ["localhost", "127.0.0.1"]

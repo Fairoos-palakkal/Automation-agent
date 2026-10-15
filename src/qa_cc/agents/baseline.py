@@ -141,6 +141,7 @@ class BaselineAgent:
             "Guidelines:\n"
             "- Interact with the application like a user: click buttons, click navigation links, and fill forms.\n"
             "- Do not navigate directly to static code assets (.js, .css). Explore through HTML pages and UI controls.\n"
+            "- If a cookie consent banner or welcome modal overlays the page (e.g. 'Me want it!', 'Dismiss', close button), click to dismiss it so the underlying forms and navigation buttons become interactive.\n"
             "- If a feature mentioned in the objective (e.g. login) does not exist in the site navigation, proceed to test the features that do exist.\n"
             "- Whenever you observe a bug (stale totals, broken calculations, missing validation, 404 on linked pages), immediately call report_finding with evidence before concluding."
         )

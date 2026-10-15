@@ -5,12 +5,16 @@ from typing import Any, Dict, List, Optional
 from qa_cc.verdict.evidence import Evidence, EvidenceType
 
 
-def compact_snapshot(html: str, max_chars: int = 4000) -> str:
+def compact_snapshot(html: str, max_chars: int = 8000) -> str:
     """Compact raw HTML into a clean, token-efficient representation for agent consumption."""
+    # Strip head tags (meta, links, preconnects, stylesheets)
+    cleaned = re.sub(r"<head[\s\S]*?</head>", "", html, flags=re.IGNORECASE)
     # Strip script tags
-    cleaned = re.sub(r"<script[\s\S]*?</script>", "", html, flags=re.IGNORECASE)
+    cleaned = re.sub(r"<script[\s\S]*?</script>", "", cleaned, flags=re.IGNORECASE)
     # Strip style tags
     cleaned = re.sub(r"<style[\s\S]*?</style>", "", cleaned, flags=re.IGNORECASE)
+    # Strip svg tags
+    cleaned = re.sub(r"<svg[\s\S]*?</svg>", "", cleaned, flags=re.IGNORECASE)
     # Strip comments
     cleaned = re.sub(r"<!--[\s\S]*?-->", "", cleaned)
     # Normalize multiple whitespace characters

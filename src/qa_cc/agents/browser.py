@@ -151,6 +151,7 @@ class BrowserAgent:
             "Guidelines:\n"
             "- Interact with the application like a user: click buttons, click navigation links, and fill forms.\n"
             "- Do not navigate directly to static code files (.js, .css). Explore through HTML pages and UI controls.\n"
+            "- If a cookie consent banner or welcome modal overlays the page (e.g. 'Me want it!', 'Dismiss', close button), click to dismiss it so the underlying forms and navigation buttons become interactive.\n"
             "- Detect defects, report findings immediately with evidence using report_finding, and conclude with finish.\n"
             "- Stay strictly within the scope of your assigned task."
         )
