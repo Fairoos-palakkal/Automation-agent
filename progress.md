@@ -1,7 +1,7 @@
 # Agentic QA Command Center — Progress Report
 
-> **Last Updated:** 2026-10-14  
-> **Completed Phases:** Phase 0, Phase 1, Phase 2  
+> **Last Updated:** 2026-10-15  
+> **Completed Phases:** Phase 0, Phase 1, Phase 2, Live Empirical Validation  
 > **Next Phase:** Phase 3 (Challenger, Juice Shop, Polish)  
 > **Test Status:** 100 unit tests passing, 2 E2E passing, 2 contract tests passing
 
@@ -211,8 +211,26 @@ Phase 2 established the multi-agent split into Planner + Browser Agent + API Age
 
 | File | What it does |
 |---|---|
-| [`src/qa_cc/cli.py`](file:///Users/fairoospalakkal/Desktop/Automation-agent/src/qa_cc/cli.py) | Added `--multi-agent` flag to `qa_cc run` and `--compare <dir>` to `qa_cc score` to evaluate baseline vs multi-agent side-by-side. |
+| [`src/qa_cc/cli.py`](file:///Users/fairoospalakkal/Desktop/Automation-agent/src/qa_cc/cli.py) | Added `--multi-agent` flag to `qa_cc run` and `--compare <dir>` to `qa_cc score` to evaluate baseline vs multi-agent side-by-side. Dynamic hostname allowlist registration. |
 | [`tests/e2e/test_multi_agent_e2e.py`](file:///Users/fairoospalakkal/Desktop/Automation-agent/tests/e2e/test_multi_agent_e2e.py) | Phase 2 Gate E2E test: runs Planner + BrowserAgent (Playwright) + APIAgent (FastAPI backend) on Own Site, generates report, and scores against ground truth. |
+
+### 2.8 — Live Empirical Validation & Agent Guardrails (Complete ✅)
+
+| Item | What was implemented / validated |
+|---|---|
+| [`src/qa_cc/cli.py`](file:///Users/fairoospalakkal/Desktop/Automation-agent/src/qa_cc/cli.py) | Automatic hostname extraction into `ToolGateway` allowlist (supporting `127.0.0.1`, `localhost`, and `--allowlist` external hosts). |
+| [`src/qa_cc/agents/baseline.py`](file:///Users/fairoospalakkal/Desktop/Automation-agent/src/qa_cc/agents/baseline.py) & [`browser.py`](file:///Users/fairoospalakkal/Desktop/Automation-agent/src/qa_cc/agents/browser.py) | Reinforced system prompts with UI-first guardrails: forbidding raw `.js`/`.css` navigation, prioritizing DOM controls, and handling missing objective features gracefully without asset-hunting loops. |
+| Live Target Testing (`http://127.0.0.1:5500`) | Autonomous exploratory runs against "The Noshery" live web app successfully discovered and documented 3 real bugs. |
+| [`run_output/report.html`](file:///Users/fairoospalakkal/Desktop/Automation-agent/run_output/report.html) | Generated dark-mode executive report with complete DOM evidence snapshots and reproducible steps. |
+| [`README.md`](file:///Users/fairoospalakkal/Desktop/Automation-agent/README.md) | Comprehensive documentation covering architecture, all agents, how-to-use guide, action budget guidelines, and live defect evidence. |
+
+**Live Discovered Defects Summary:**
+
+| Defect ID | Title | Discovered By | Evidence Type | Root Cause |
+|---|---|---|---|---|
+| **F-1** | Cart minus button allows negative quantities (`2 → 1 → 0 → -1 → -2`) | `BrowserAgent` (12 actions) | DOM Snapshot | `js/cart.js` `changeQty()` lacks lower-bound clamp `if (qty <= 1)`, producing `$-4.99` and `$-9.98` line totals. |
+| **F-2** | Stale Cart Summary & Total Desynchronization | `BrowserAgent` (12 actions) | DOM Snapshot | `renderTotal()`, `renderHeadline()`, and badge updates only fire on page load, leaving `$28.73` frozen. `checkout.js` reads stale `localStorage`. |
+| **F-3** | Case-sensitive menu search | `BaselineAgent` (11 actions) | DOM Snapshot | `js/menu.js` filter compares raw query against dish titles without `.toLowerCase()`, rejecting `"pizza"` while accepting `"Pizza"`. |
 
 ---
 
