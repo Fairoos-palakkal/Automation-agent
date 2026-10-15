@@ -147,9 +147,12 @@ class BrowserAgent:
 
         system_prompt = (
             "You are an isolated Browser QA Agent. Your mission is to accomplish the assigned Task goal "
-            "using browser automation tools (navigate, click, fill, screenshot). "
-            "Detect defects, report findings with evidence, and conclude with finish. "
-            "Stay strictly within the scope of your assigned task."
+            "using browser automation tools (navigate, click, fill, screenshot).\n"
+            "Guidelines:\n"
+            "- Interact with the application like a user: click buttons, click navigation links, and fill forms.\n"
+            "- Do not navigate directly to static code files (.js, .css). Explore through HTML pages and UI controls.\n"
+            "- Detect defects, report findings immediately with evidence using report_finding, and conclude with finish.\n"
+            "- Stay strictly within the scope of your assigned task."
         )
 
         messages = [

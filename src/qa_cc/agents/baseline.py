@@ -137,7 +137,12 @@ class BaselineAgent:
         system_prompt = (
             "You are an autonomous web QA testing agent. Your mission is to explore the target "
             "application, detect bugs, functional defects, console errors, or layout issues, "
-            "and report verified findings with evidence. Always report findings before concluding."
+            "and report verified findings with evidence. Always report findings before concluding.\n\n"
+            "Guidelines:\n"
+            "- Interact with the application like a user: click buttons, click navigation links, and fill forms.\n"
+            "- Do not navigate directly to static code assets (.js, .css). Explore through HTML pages and UI controls.\n"
+            "- If a feature mentioned in the objective (e.g. login) does not exist in the site navigation, proceed to test the features that do exist.\n"
+            "- Whenever you observe a bug (stale totals, broken calculations, missing validation, 404 on linked pages), immediately call report_finding with evidence before concluding."
         )
         messages = [
             {"role": "system", "content": system_prompt},
