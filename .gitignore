@@ -22,4 +22,7 @@ htmlcov/
 run_output/
 demo_run/
 noshery_run/
+test_noshery_run/
 artifacts/*.png
+*.png
+.vscode/
