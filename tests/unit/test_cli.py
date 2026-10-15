@@ -108,3 +108,28 @@ class TestCLI:
         proc = subprocess.run(cmd, capture_output=True, text=True)
         assert proc.returncode == 0
         assert "COMPARISON" in proc.stdout or "Run 1" in proc.stdout
+
+    def test_cli_results_table_format(self):
+        """CLI results --format table prints benchmark comparison table."""
+        cmd = [sys.executable, "-m", "qa_cc", "results", "--format", "table"]
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+        assert proc.returncode == 0
+        assert "BENCHMARK RESULTS" in proc.stdout or "Recall" in proc.stdout
+        assert "Baseline" in proc.stdout
+        assert "Multi-Agent" in proc.stdout
+
+    def test_cli_results_include_held_out(self):
+        """CLI results --include-held-out includes held-out defects in summary."""
+        cmd = [sys.executable, "-m", "qa_cc", "results", "--include-held-out"]
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+        assert proc.returncode == 0
+        assert "Held-Out" in proc.stdout
+
+    def test_cli_results_json_format(self):
+        """CLI results --format json outputs valid json."""
+        cmd = [sys.executable, "-m", "qa_cc", "results", "--format", "json"]
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+        assert proc.returncode == 0
+        data = json.loads(proc.stdout)
+        assert "benchmark_results" in data
+
