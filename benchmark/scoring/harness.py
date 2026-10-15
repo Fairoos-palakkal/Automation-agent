@@ -39,10 +39,39 @@ class ScoringHarness:
         replay_results: Optional[Dict[str, bool]] = None,
         expected_model: Optional[str] = None,
         actual_model: Optional[str] = None,
+        target_type: str = "own_site",
+        scoreboard_challenges: Optional[List[Dict[str, Any]]] = None,
     ) -> ScoreReport:
         if expected_model and actual_model and expected_model != actual_model:
             raise MismatchedModelError(
                 f"Benchmark runs must use identical models. Expected '{expected_model}', found '{actual_model}'."
+            )
+
+        if target_type == "juice_shop" or scoreboard_challenges is not None:
+            challenges = scoreboard_challenges or []
+            solved = [c.get("name", c.get("key", "unknown")) for c in challenges if c.get("solved") is True]
+            total_count = len(challenges)
+            recall = len(solved) / total_count if total_count > 0 else 0.0
+
+            matched_defects = set(solved)
+            unmatched_findings = []
+            for finding in findings:
+                summary_lower = finding.summary.lower()
+                if not any(s.lower() in summary_lower for s in solved):
+                    unmatched_findings.append(finding)
+
+            replay_rate = 0.0
+            if replay_results:
+                successful_replays = sum(1 for passed in replay_results.values() if passed)
+                replay_rate = successful_replays / len(replay_results)
+
+            return ScoreReport(
+                recall=recall,
+                matched_defects=sorted(list(matched_defects)),
+                unmatched_findings=unmatched_findings,
+                total_defects=total_count,
+                replay_rate=replay_rate,
+                model_id=actual_model or expected_model,
             )
 
         all_defects = self._load_defects()
