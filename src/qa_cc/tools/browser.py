@@ -22,18 +22,30 @@ def compact_snapshot(html: str, max_chars: int = 4000) -> str:
     return cleaned
 
 
+def delimit_dom_content(content: str) -> str:
+    """Wraps untrusted DOM content in explicit semantic boundary markers."""
+    return f"<UNTRUSTED_DOM_CONTENT>\n{content}\n</UNTRUSTED_DOM_CONTENT>"
+
+
 class BrowserTools:
     """Encapsulates browser automation commands operating on a driver."""
 
-    def __init__(self, driver: Any):
+    def __init__(self, driver: Any, delimit: bool = True):
         self.driver = driver
+        self.delimit = delimit
+
+    def _format_snapshot(self, content: str) -> str:
+        compacted = compact_snapshot(content)
+        if self.delimit:
+            return delimit_dom_content(compacted)
+        return compacted
 
     def navigate(self, url: str) -> Dict[str, Any]:
         self.driver.goto(url)
         content = self.driver.content()
         return {
             "url": getattr(self.driver, "url", url),
-            "snapshot": compact_snapshot(content),
+            "snapshot": self._format_snapshot(content),
         }
 
     def click(self, selector: str) -> Dict[str, Any]:
@@ -41,14 +53,14 @@ class BrowserTools:
         content = self.driver.content()
         return {
             "url": getattr(self.driver, "url", ""),
-            "snapshot": compact_snapshot(content),
+            "snapshot": self._format_snapshot(content),
         }
 
     def fill(self, selector: str, value: str) -> Dict[str, Any]:
         self.driver.fill(selector, value)
         content = self.driver.content()
         return {
-            "snapshot": compact_snapshot(content),
+            "snapshot": self._format_snapshot(content),
         }
 
     def screenshot(self, path: str = "artifacts/screenshot.png") -> Evidence:
@@ -63,4 +75,4 @@ class BrowserTools:
         return [m for m in messages if m.get("type") == "error"]
 
     def snapshot(self) -> str:
-        return compact_snapshot(self.driver.content())
+        return self._format_snapshot(self.driver.content())
