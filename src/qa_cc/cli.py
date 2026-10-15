@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import sys
 from typing import List, Optional
+from urllib.parse import urlparse
 
 from qa_cc.agents.baseline import BaselineAgent, RunResult
 from qa_cc.agents.plan import Plan, Task, AgentType
@@ -36,6 +37,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--mock", action="store_true", help="Use deterministic mock provider for testing")
     run_parser.add_argument("--multi-agent", action="store_true", help="Run with Planner + BrowserAgent + APIAgent")
     run_parser.add_argument("--max-actions", type=int, default=25, help="Action budget limit")
+    run_parser.add_argument("--allowlist", nargs="*", default=[], help="Additional allowed hostnames for tool access")
 
     # Score subcommand
     score_parser = subparsers.add_parser("score", help="Score findings from a completed run against ground truth")
@@ -55,7 +57,16 @@ def handle_run(args: argparse.Namespace) -> int:
 
     trace_writer = TraceWriter(trace_path)
     run_state = RunState(max_actions=args.max_actions)
-    gateway = ToolGateway(trace_writer=trace_writer)
+
+    target_parsed = urlparse(args.target)
+    allowlist = ["localhost", "127.0.0.1"]
+    if target_parsed.hostname and target_parsed.hostname not in allowlist:
+        allowlist.append(target_parsed.hostname)
+    for extra in args.allowlist:
+        if extra not in allowlist:
+            allowlist.append(extra)
+
+    gateway = ToolGateway(allowlist=allowlist, trace_writer=trace_writer)
 
     browser_instance = None
     playwright_ctx = None
