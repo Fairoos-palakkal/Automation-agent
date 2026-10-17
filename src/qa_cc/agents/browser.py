@@ -122,6 +122,10 @@ BROWSER_TOOLS: List[Dict[str, Any]] = [
 ]
 
 
+from qa_cc.agents.loop import AgentLoop
+from qa_cc.agents.step_log import StepLog
+
+
 class BrowserAgent:
     """Carries out browser automation Tasks in isolation."""
 
@@ -144,6 +148,7 @@ class BrowserAgent:
         max_actions = task.budget.get("max_actions", 25)
         max_tokens = task.budget.get("max_tokens", 100_000)
         run_state = RunState(max_actions=max_actions, max_tokens=max_tokens)
+        step_log = StepLog()
 
         system_prompt = (
             "You are an isolated Browser QA Agent. Your mission is to accomplish the assigned Task goal "
@@ -162,153 +167,23 @@ class BrowserAgent:
             "5. Stay strictly within the scope of your assigned task, and call finish when done."
         )
 
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"Task ID: {task.id}\nGoal: {task.goal}\nTarget URL: {target_url}"},
-        ]
-
-        current_url = target_url
-        last_obs = ""
-        budget_exceeded = False
-        loop_recovery_triggered = False
-        summary = ""
-        recorded_steps: List[Dict[str, Any]] = []
-
-        for _ in range(max_turns):
-            try:
-                run_state.check_budget()
-            except BudgetExceeded:
-                budget_exceeded = True
-                break
-
-            try:
-                response = self.client.chat(messages, tools=self.tools)
-            except Exception:
-                break
-
-            usage = response.get("usage", {})
-            run_state.record_tokens(usage.get("total_tokens", 0))
-
-            if self.trace_writer:
-                self.trace_writer.record({
-                    "type": "subagent_model_call",
-                    "task_id": task.id,
-                    "agent": "browser",
-                    "tokens": usage.get("total_tokens", 0),
-                    "usage": usage,
-                })
-
-            choice = response.get("choices", [{}])[0]
-            msg = choice.get("message", {})
-            messages.append(msg)
-
-            tool_calls = msg.get("tool_calls")
-            if not tool_calls:
-                break
-
-            finished = False
-            for tc in tool_calls:
-                func = tc.get("function", {})
-                tool_name = func.get("name")
-                raw_args = func.get("arguments", {})
-                if isinstance(raw_args, str):
-                    try:
-                        args = json.loads(raw_args)
-                    except Exception:
-                        args = {}
-                else:
-                    args = raw_args
-
-                if tool_name == "finish":
-                    summary = args.get("summary", "Task concluded")
-                    finished = True
-                    break
-
-                if tool_name == "report_finding":
-                    ev_type_str = args.get("evidence_type", "dom_snapshot")
-                    try:
-                        ev_type = EvidenceType(ev_type_str)
-                    except ValueError:
-                        ev_type = EvidenceType.DOM_SNAPSHOT
-
-                    ev = Evidence(
-                        type=ev_type,
-                        content=args.get("evidence_content", ""),
-                        metadata={"url": current_url, "task_id": task.id},
-                    )
-                    finding = Finding(
-                        id=f"F-{task.id}-{len(run_state.findings) + 1}",
-                        summary=args.get("summary", "Defect discovered"),
-                        evidence=[ev],
-                        steps=list(recorded_steps),
-                        metadata={"task_id": task.id, "assignee": "browser"},
-                    )
-                    run_state.add_finding(finding)
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc.get("id", "tc-1"),
-                        "name": tool_name,
-                        "content": f"Finding recorded: {finding.id}",
-                    })
-                    continue
-
-                # Browser actions
-                action_fp = compute_action_fingerprint(tool_name, args, current_url)
-                obs_fp = compute_observation_fingerprint(last_obs)
-
-                loop_action = self.loop_detector.check(action_fp, obs_fp)
-                if loop_action in (RecoveryAction.RE_OBSERVE, RecoveryAction.TRY_ALTERNATE):
-                    loop_recovery_triggered = True
-                elif loop_action == RecoveryAction.TERMINATE_INCONCLUSIVE:
-                    loop_recovery_triggered = True
-                    finished = True
-                    break
-
-                try:
-                    run_state.check_budget()
-                    run_state.record_action(action_fp)
-                except BudgetExceeded:
-                    budget_exceeded = True
-                    finished = True
-                    break
-
-                step_record = {
-                    "tool": tool_name,
-                    "args": args,
-                    "fingerprint": action_fp,
-                }
-                recorded_steps.append(step_record)
-
-                try:
-                    res = self.gateway.execute(tool_name, args)
-                    if isinstance(res, dict) and "url" in res:
-                        current_url = res["url"]
-                    if isinstance(res, dict) and "snapshot" in res:
-                        last_obs = res["snapshot"]
-                    res_str = json.dumps(res, default=str) if isinstance(res, (dict, list)) else str(res)
-                except Exception as e:
-                    res_str = f"Error executing {tool_name}: {e}"
-
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tc.get("id", "tc-1"),
-                    "name": tool_name,
-                    "content": res_str,
-                })
-
-            if finished:
-                break
-
-        status = "budget_exceeded" if budget_exceeded else "completed"
-
-        return TaskResult(
+        user_content = f"Task ID: {task.id}\nGoal: {task.goal}\nTarget URL: {target_url}"
+        loop = AgentLoop(
+            client=self.client,
+            gateway=self.gateway,
+            tools=self.tools,
+            system_prompt=system_prompt,
+            run_state=run_state,
+            step_log=step_log,
+            trace_writer=self.trace_writer,
+            loop_detector=self.loop_detector,
+            agent_name="browser",
             task_id=task.id,
-            status=status,
-            findings=run_state.findings,
-            steps=recorded_steps,
-            summary=summary,
-            actions_count=run_state.actions_count,
-            tokens_used=run_state.tokens_count,
-            budget_exceeded=budget_exceeded,
-            loop_recovery_triggered=loop_recovery_triggered,
         )
+        loop_result = loop.run(
+            target=target_url,
+            max_turns=max_turns,
+            extra_user_content=user_content,
+        )
+        return loop_result.to_task_result(task_id=task.id)
+

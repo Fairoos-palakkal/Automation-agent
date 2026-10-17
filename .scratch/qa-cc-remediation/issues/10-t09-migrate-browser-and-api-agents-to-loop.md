@@ -4,9 +4,9 @@
 
 **Blocked by:** 09: T-08: Shared AgentLoop and StepLog Architecture (Expand)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 ## Acceptance criteria
 
-- [ ] Duplicated agent loops in browser.py and api.py are eliminated (~500 fewer lines)
-- [ ] All unit and contract tests for BrowserAgent and ApiAgent pass on the shared AgentLoop
+- [x] Duplicated agent loops in browser.py and api.py are eliminated (~500 fewer lines)
+- [x] All unit and contract tests for BrowserAgent and ApiAgent pass on the shared AgentLoop

@@ -327,10 +327,14 @@ class AgentLoop:
         except ValueError:
             ev_type = EvidenceType.DOM_SNAPSHOT
 
+        ev_metadata = {"url": current_url, "agent": self.agent_name, "task_id": self.task_id}
+        if self.agent_name == "api":
+            ev_metadata["base_url"] = current_url
+
         ev = Evidence(
             type=ev_type,
             content=args.get("evidence_content", ""),
-            metadata={"url": current_url, "agent": self.agent_name, "task_id": self.task_id},
+            metadata=ev_metadata,
         )
 
         # Concrete StepLog steps if available, else fingerprints for backwards compatibility
@@ -342,10 +346,16 @@ class AgentLoop:
             ]
 
         finding_id = f"F-{self.task_id + '-' if self.task_id else ''}{len(self.run_state.findings) + 1}"
+        default_summary = "API Defect discovered" if self.agent_name == "api" else "Defect discovered"
+        finding_metadata = {"agent": self.agent_name, "task_id": self.task_id}
+        if self.agent_name:
+            finding_metadata["assignee"] = self.agent_name
+
         return Finding(
             id=finding_id,
-            summary=args.get("summary", "Defect discovered"),
+            summary=args.get("summary", default_summary),
             evidence=[ev],
             steps=step_dicts,
-            metadata={"agent": self.agent_name, "task_id": self.task_id},
+            metadata=finding_metadata,
         )
+
