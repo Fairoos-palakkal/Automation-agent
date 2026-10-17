@@ -37,3 +37,5 @@ artifacts/*.png
 # IDE & Editor configs
 .vscode/
 .idea/
+.scratch/
+.agents/
