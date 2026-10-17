@@ -1,0 +1,30 @@
+{
+  "name": "OWASP Juice Shop",
+  "description": "Insecure Angular SPA e-commerce web application",
+  "hints": [
+    "Always dismiss the Welcome Banner modal ('Close Welcome Banner') and Cookie consent ('Me want it!') first.",
+    "SPA routes use hash navigation: /#/login, /#/register, /#/search, /#/basket.",
+    "The login submit button stays disabled until both email and password fields contain input.",
+    "API endpoints are under /rest/ and /api/ (e.g. /rest/user/login, /rest/products/search, /rest/basket)."
+  ],
+  "endpoints": [
+    "/#/login",
+    "/#/register",
+    "/#/search",
+    "/rest/user/login",
+    "/rest/products/search",
+    "/rest/basket"
+  ],
+  "selectors": [
+    "button[aria-label='Close Welcome Banner']",
+    "a.cc-btn",
+    "input#email",
+    "input#password",
+    "button#loginButton",
+    "#searchQuery"
+  ],
+  "metadata": {
+    "environment": "local_docker",
+    "target_url": "http://localhost:3000"
+  }
+}
