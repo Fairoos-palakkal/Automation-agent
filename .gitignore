@@ -39,3 +39,10 @@ artifacts/*.png
 .idea/
 .scratch/
 .agents/
+CLAUDE.md
+GEMINI.md
+GLOSSARY.md
+docs/agents/
+files/
+progress.md
+tdd_implementation_plan.md
