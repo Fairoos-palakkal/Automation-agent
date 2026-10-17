@@ -39,3 +39,14 @@ artifacts/*.png
 .idea/
 .scratch/
 .agents/
+CLAUDE.md
+GEMINI.md
+GLOSSARY.md
+docs/agents/
+files/CLAUDE.md
+files/README.md
+files/0001-deterministic-verdicts-no-evaluation-agent.md
+files/findings.json
+files/report.html
+progress.md
+tdd_implementation_plan.md
