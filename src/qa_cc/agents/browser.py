@@ -95,18 +95,27 @@ BROWSER_TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "report_finding",
-            "description": "Record a discovered defect with evidence.",
+            "description": "Record a discovered defect with structured claims, observations, and evidence.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "summary": {"type": "string", "description": "Summary of the defect"},
-                    "evidence_type": {"type": "string", "enum": ["screenshot", "console_log", "dom_snapshot"]},
-                    "evidence_content": {"type": "string", "description": "Captured evidence text, log, or file path"},
+                    "expected": {"type": "string", "description": "Expected behavior or UI state"},
+                    "actual": {"type": "string", "description": "Actual observed defect behavior"},
+                    "selector_or_url": {"type": "string", "description": "CSS selector or URL where defect occurred"},
+                    "step_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "IDs of steps in StepLog that reproduce defect (e.g. ['step-1', 'step-2'])",
+                    },
+                    "evidence_type": {"type": "string", "enum": ["screenshot", "console_log", "dom_snapshot", "network_request"]},
+                    "evidence_content": {"type": "string", "description": "Optional evidence text or path (runtime automatically captures real observation)"},
                 },
-                "required": ["summary", "evidence_type", "evidence_content"],
+                "required": ["summary"],
             },
         },
     },
+
     {
         "type": "function",
         "function": {

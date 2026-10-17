@@ -41,6 +41,10 @@ class Finding(BaseModel):
     verdict: Optional[Verdict] = None
     steps: List[Dict[str, Any]] = Field(default_factory=list)
     metadata: Dict[str, Any] = Field(default_factory=dict)
+    expected: Optional[str] = None
+    actual: Optional[str] = None
+    selector_or_url: Optional[str] = None
+    step_ids: List[str] = Field(default_factory=list)
 
     @field_validator("evidence")
     @classmethod

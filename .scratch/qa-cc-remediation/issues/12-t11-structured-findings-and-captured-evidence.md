@@ -4,10 +4,10 @@
 
 **Blocked by:** 09: T-08: Shared AgentLoop and StepLog Architecture (Expand), 11: T-10: Run Identity, Directory Layout, and Validated TraceEntry Schema
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 ## Acceptance criteria
 
-- [ ] Findings in findings.json contain non-empty, non-fingerprint step lists referencing StepLog IDs
-- [ ] Model-supplied `evidence_content` strings are ignored in favor of gateway-captured evidence
-- [ ] Baseline findings are replayable with concrete actions and selectors
+- [x] Findings in findings.json contain non-empty, non-fingerprint step lists referencing StepLog IDs
+- [x] Model-supplied `evidence_content` strings are ignored in favor of gateway-captured evidence
+- [x] Baseline findings are replayable with concrete actions and selectors

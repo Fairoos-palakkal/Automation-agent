@@ -321,24 +321,46 @@ class AgentLoop:
         )
 
     def _create_finding(self, args: Dict[str, Any], current_url: str) -> Finding:
-        ev_type_str = args.get("evidence_type", "dom_snapshot")
-        try:
-            ev_type = EvidenceType(ev_type_str)
-        except ValueError:
-            ev_type = EvidenceType.DOM_SNAPSHOT
+        summary = args.get("summary", "API Defect discovered" if self.agent_name == "api" else "Defect discovered")
+        expected = args.get("expected")
+        actual = args.get("actual")
+        selector_or_url = args.get("selector_or_url") or args.get("selector") or args.get("url")
+        step_ids = args.get("step_ids") or []
 
-        ev_metadata = {"url": current_url, "agent": self.agent_name, "task_id": self.task_id}
-        if self.agent_name == "api":
-            ev_metadata["base_url"] = current_url
+        # Automatic observation capture: real captured observation takes precedence over model text
+        requested_type = args.get("evidence_type")
+        captured_ev = self.step_log.capture_evidence(url=current_url, requested_type=requested_type)
+        if captured_ev is not None:
+            ev = captured_ev
+            if self.agent_name:
+                ev.metadata["agent"] = self.agent_name
+            if self.task_id:
+                ev.metadata["task_id"] = self.task_id
+        else:
+            ev_type_str = args.get("evidence_type", "network_request" if self.agent_name == "api" else "dom_snapshot")
+            try:
+                ev_type = EvidenceType(ev_type_str)
+            except ValueError:
+                ev_type = EvidenceType.DOM_SNAPSHOT
 
-        ev = Evidence(
-            type=ev_type,
-            content=args.get("evidence_content", ""),
-            metadata=ev_metadata,
-        )
+            ev_metadata = {"url": current_url, "agent": self.agent_name, "task_id": self.task_id}
+            if self.agent_name == "api":
+                ev_metadata["base_url"] = current_url
 
-        # Concrete StepLog steps if available, else fingerprints for backwards compatibility
-        step_dicts = self.step_log.get_step_dicts()
+            ev_content = actual or args.get("evidence_content", "") or summary
+            ev = Evidence(
+                type=ev_type,
+                content=ev_content,
+                metadata=ev_metadata,
+            )
+
+        # Concrete StepLog steps if available, filtered by step_ids if specified
+        if step_ids:
+            matching_steps = self.step_log.get_steps_by_ids(step_ids)
+            step_dicts = [s.to_dict() for s in matching_steps]
+        else:
+            step_dicts = self.step_log.get_step_dicts()
+
         if not step_dicts:
             step_dicts = [
                 {"fingerprint": fp} if isinstance(fp, str) else fp
@@ -346,16 +368,20 @@ class AgentLoop:
             ]
 
         finding_id = f"F-{self.task_id + '-' if self.task_id else ''}{len(self.run_state.findings) + 1}"
-        default_summary = "API Defect discovered" if self.agent_name == "api" else "Defect discovered"
         finding_metadata = {"agent": self.agent_name, "task_id": self.task_id}
         if self.agent_name:
             finding_metadata["assignee"] = self.agent_name
 
         return Finding(
             id=finding_id,
-            summary=args.get("summary", default_summary),
+            summary=summary,
             evidence=[ev],
             steps=step_dicts,
             metadata=finding_metadata,
+            expected=expected,
+            actual=actual,
+            selector_or_url=selector_or_url,
+            step_ids=step_ids,
         )
+
 

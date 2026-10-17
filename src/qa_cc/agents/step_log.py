@@ -110,5 +110,75 @@ class StepLog:
         id_set = set(step_ids)
         return [step for step in self._steps if step.step_id in id_set]
 
+    def capture_evidence(self, url: str = "", requested_type: Optional[str] = None) -> Optional[Any]:
+        """Build Evidence from the last real observation, ignoring fabricated model text.
+
+        If requested_type is specified (e.g. 'console_log', 'network_request', 'dom_snapshot'):
+        - Returns real observation evidence if compatible.
+        - Returns None if incompatible (e.g. 'console_log' requested but only 'dom_snapshot'
+          was captured with no console errors), allowing caller to handle fallback.
+        """
+        if self._last_observation is None:
+            return None
+
+        import json
+        from qa_cc.verdict.evidence import Evidence, EvidenceType
+
+        if requested_type is not None:
+            req = str(requested_type).lower()
+            if req == "console_log":
+                if self._last_observation_type != "console_log" and not (
+                    isinstance(self._last_observation, dict) and ("errors" in self._last_observation or "console_errors" in self._last_observation)
+                ):
+                    return None
+            elif req == "network_request":
+                if self._last_observation_type != "network_request" and not (
+                    isinstance(self._last_observation, dict) and "status_code" in self._last_observation
+                ):
+                    return None
+            elif req in ("dom_snapshot", "screenshot"):
+                if self._last_observation_type not in ("dom_snapshot", "screenshot"):
+                    return None
+
+        if self._last_observation_type == "network_request" or (
+            isinstance(self._last_observation, dict) and "status_code" in self._last_observation
+        ):
+            content = json.dumps(self._last_observation.get("body", self._last_observation), default=str)
+            return Evidence(
+                type=EvidenceType.NETWORK_REQUEST,
+                content=content,
+                metadata={"url": url, "status_code": self._last_observation.get("status_code", 200)},
+            )
+        elif self._last_observation_type == "console_log" or (
+            isinstance(self._last_observation, dict) and ("errors" in self._last_observation or "console_errors" in self._last_observation)
+        ):
+            errors = self._last_observation.get("errors") or self._last_observation.get("console_errors", [])
+            content = json.dumps(errors, default=str) if isinstance(errors, (list, dict)) else str(errors)
+            return Evidence(
+                type=EvidenceType.CONSOLE_LOG,
+                content=content,
+                metadata={"url": url},
+            )
+        elif isinstance(self._last_observation, dict) and "snapshot" in self._last_observation:
+            return Evidence(
+                type=EvidenceType.DOM_SNAPSHOT,
+                content=str(self._last_observation["snapshot"]),
+                metadata={"url": url},
+            )
+        elif isinstance(self._last_observation, dict) and "path" in self._last_observation:
+            return Evidence(
+                type=EvidenceType.SCREENSHOT,
+                content=str(self._last_observation["path"]),
+                metadata={"url": url},
+            )
+        elif isinstance(self._last_observation, str):
+            return Evidence(
+                type=EvidenceType.DOM_SNAPSHOT,
+                content=self._last_observation,
+                metadata={"url": url},
+            )
+        return None
+
     def __len__(self) -> int:
         return len(self._steps)
+

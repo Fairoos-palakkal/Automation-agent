@@ -48,18 +48,27 @@ API_TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "report_finding",
-            "description": "Record a discovered defect with evidence.",
+            "description": "Record a discovered API defect with structured claims, observations, and evidence.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "summary": {"type": "string", "description": "Summary of the defect"},
+                    "expected": {"type": "string", "description": "Expected status code or response structure"},
+                    "actual": {"type": "string", "description": "Actual observed response status or body error"},
+                    "selector_or_url": {"type": "string", "description": "API URL/endpoint where defect occurred"},
+                    "step_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "IDs of steps in StepLog that reproduce defect (e.g. ['step-1', 'step-2'])",
+                    },
                     "evidence_type": {"type": "string", "enum": ["network_request", "dom_snapshot", "console_log"]},
-                    "evidence_content": {"type": "string", "description": "Captured evidence text, log, or file path"},
+                    "evidence_content": {"type": "string", "description": "Optional evidence text or path (runtime automatically captures real observation)"},
                 },
-                "required": ["summary", "evidence_type", "evidence_content"],
+                "required": ["summary"],
             },
         },
     },
+
     {
         "type": "function",
         "function": {
