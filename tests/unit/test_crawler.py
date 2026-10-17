@@ -92,3 +92,15 @@ class TestCrawler:
         coverage = inventory.calculate_coverage(exercised_urls=exercised)
 
         assert pytest.approx(coverage, 0.01) == 0.50  # 2 of 4 pages
+
+    @pytest.mark.parametrize("bypass_url", [
+        "http://localhost.evil.com",
+        "https://evil.com/?next=localhost",
+        "http://localhost@evil.com/",
+        "http://evil.com/localhost",
+    ])
+    def test_crawler_rejects_allowlist_bypasses(self, bypass_url):
+        """Crawler._is_allowed returns False for lookalike and substring bypass URLs."""
+        crawler = Crawler(allowlist=["localhost", "127.0.0.1"])
+        assert crawler._is_allowed(bypass_url) is False
+

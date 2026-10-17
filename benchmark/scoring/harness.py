@@ -22,6 +22,45 @@ class ScoreReport:
     model_id: Optional[str] = None
 
 
+def _matches_juice_shop_challenge(finding: Finding, challenge: Union[Dict[str, Any], str]) -> bool:
+    summary_lower = finding.summary.lower()
+    ev_text = " ".join(str(ev.content).lower() for ev in finding.evidence)
+    full_text = f"{summary_lower} {ev_text}"
+
+    if isinstance(challenge, str):
+        name = challenge.strip().lower()
+        key = name.replace(" ", "").lower()
+    else:
+        name = str(challenge.get("name", "")).strip().lower()
+        key = str(challenge.get("key", "")).strip().lower()
+
+    # 1. Direct name or key substring match
+    if name and name in summary_lower:
+        return True
+    if key and key in summary_lower:
+        return True
+
+    # 2. Tokenized name match: all significant words in the challenge name appear
+    name_words = [w for w in name.split() if len(w) > 2]
+    if name_words and all(w in summary_lower for w in name_words):
+        return True
+
+    # 3. Domain heuristics for canonical Juice Shop challenges
+    if "errorhandling" in key or name == "error handling":
+        if ("500" in full_text or "sqlite" in full_text or "syntax error" in full_text or "stack trace" in full_text or "information disclosure" in full_text or "unhandled" in full_text) and "error" in full_text:
+            return True
+
+    if "loginadmin" in key or name == "login admin":
+        if ("admin" in full_text or "administrator" in full_text) and ("login" in full_text or "auth" in full_text or "bypass" in full_text):
+            return True
+
+    if "scoreboard" in key or name == "score board":
+        if "scoreboard" in full_text or "score board" in full_text:
+            return True
+
+    return False
+
+
 class ScoringHarness:
     """Evaluates Run findings offline against frozen ground truth defects."""
 
@@ -48,16 +87,31 @@ class ScoringHarness:
             )
 
         if target_type == "juice_shop" or scoreboard_challenges is not None:
-            challenges = scoreboard_challenges or []
-            solved = [c.get("name", c.get("key", "unknown")) for c in challenges if c.get("solved") is True]
-            total_count = len(challenges)
-            recall = len(solved) / total_count if total_count > 0 else 0.0
+            if scoreboard_challenges is None and target_type == "juice_shop":
+                try:
+                    from benchmark.scoring.juice_shop import JuiceShopScoreboardReader
+                    reader = JuiceShopScoreboardReader()
+                    challenges = reader.fetch_challenges()
+                except Exception:
+                    challenges = []
+            else:
+                challenges = scoreboard_challenges or []
 
-            matched_defects = set(solved)
+            solved_challenges = [c for c in challenges if isinstance(c, dict) and c.get("solved") is True]
+            if not solved_challenges and challenges and not isinstance(challenges[0], dict):
+                solved_challenges = challenges
+
+            solved_names = [
+                c.get("name", c.get("key", "unknown")) if isinstance(c, dict) else str(c)
+                for c in solved_challenges
+            ]
+            total_count = len(challenges)
+            recall = len(solved_names) / total_count if total_count > 0 else 0.0
+
+            matched_defects = set(solved_names)
             unmatched_findings = []
             for finding in findings:
-                summary_lower = finding.summary.lower()
-                if not any(s.lower() in summary_lower for s in solved):
+                if not any(_matches_juice_shop_challenge(finding, c) for c in solved_challenges):
                     unmatched_findings.append(finding)
 
             replay_rate = 0.0

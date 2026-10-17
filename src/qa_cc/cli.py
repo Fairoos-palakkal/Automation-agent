@@ -16,6 +16,7 @@ from qa_cc.gateway.gateway import ToolGateway, ToolDefinition
 from qa_cc.llm.client import LLMClient
 from qa_cc.llm.fake_provider import FakeProvider
 from qa_cc.report.generator import generate_report
+from qa_cc.security.scrubber import Scrubber
 from qa_cc.tools.http import HttpTool
 from qa_cc.trace.run_state import RunState
 from qa_cc.trace.writer import TraceWriter
@@ -46,9 +47,12 @@ def build_parser() -> argparse.ArgumentParser:
     score_parser.add_argument("--compare", help="Second run directory for comparative evaluation")
     score_parser.add_argument("--ground-truth", default="benchmark/ground_truth/defects.json", help="Path to ground truth defects.json")
     score_parser.add_argument("--include-held-out", action="store_true", help="Include held-out evaluation defects")
+    score_parser.add_argument("--target-type", choices=["own_site", "juice_shop"], default=None, help="Target application type (own_site or juice_shop)")
+    score_parser.add_argument("--scoreboard-url", default="http://localhost:3000/api/Challenges", help="Juice Shop challenges API URL")
 
     # Results subcommand
     results_parser = subparsers.add_parser("results", help="Display benchmark results and comparative table")
+    results_parser.add_argument("--runs-dir", default="runs", help="Directory containing config run directories")
     results_parser.add_argument("--format", choices=["table", "json"], default="table", help="Output format")
     results_parser.add_argument("--include-held-out", action="store_true", help="Include held-out evaluation defects in results")
 
@@ -61,7 +65,8 @@ def handle_run(args: argparse.Namespace) -> int:
     trace_path = out_dir / "trace.jsonl"
     report_path = out_dir / "report.html"
 
-    trace_writer = TraceWriter(trace_path)
+    scrubber = Scrubber(secret_env_vars=["LLM_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY"])
+    trace_writer = TraceWriter(trace_path, scrubber=scrubber)
     run_state = RunState(max_actions=args.max_actions, max_tokens=args.max_tokens)
 
     target_parsed = urlparse(args.target)
@@ -72,7 +77,7 @@ def handle_run(args: argparse.Namespace) -> int:
         if extra not in allowlist:
             allowlist.append(extra)
 
-    gateway = ToolGateway(allowlist=allowlist, trace_writer=trace_writer)
+    gateway = ToolGateway(allowlist=allowlist, trace_writer=trace_writer, scrubber=scrubber)
 
     browser_instance = None
     playwright_ctx = None
@@ -191,6 +196,7 @@ def handle_run(args: argparse.Namespace) -> int:
                 run_state=run_state,
             )
             result = orchestrator.run(objective=args.objective, target=args.target)
+            result.is_mock = True
         else:
             # Baseline single-agent mock
             canned = [
@@ -241,17 +247,22 @@ def handle_run(args: argparse.Namespace) -> int:
                 trace_writer=trace_writer,
             )
             result = agent.run(objective=args.objective, target=args.target)
+            result.is_mock = True
     else:
         api_key = os.environ.get("LLM_API_KEY", "")
-        if api_key and api_key != "your_api_key_here":
-            from qa_cc.llm.openai_provider import OpenAICompatibleProvider
-            provider = OpenAICompatibleProvider(
-                base_url=os.environ.get("LLM_BASE_URL", "https://api.openai.com/v1"),
-                api_key=api_key,
-                model=os.environ.get("LLM_MODEL", "Qwen3.8-Flash"),
+        if not api_key or api_key == "your_api_key_here":
+            print(
+                "Error: Missing LLM_API_KEY. Please set LLM_API_KEY in your environment or .env file, or use --mock for simulated runs.",
+                file=sys.stderr,
             )
-        else:
-            provider = FakeProvider()
+            return 1
+
+        from qa_cc.llm.openai_provider import OpenAICompatibleProvider
+        provider = OpenAICompatibleProvider(
+            base_url=os.environ.get("LLM_BASE_URL", "https://api.openai.com/v1"),
+            api_key=api_key,
+            model=os.environ.get("LLM_MODEL", "Qwen3.8-Flash"),
+        )
         client = LLMClient(provider=provider)
 
         # Wire live Playwright browser
@@ -263,7 +274,7 @@ def handle_run(args: argparse.Namespace) -> int:
             playwright_ctx = sync_playwright().start()
             browser_instance = playwright_ctx.chromium.launch(headless=True)
             page = browser_instance.new_page()
-            driver = PlaywrightPageDriver(page)
+            driver = PlaywrightPageDriver(page, allowlist=allowlist, trace_writer=trace_writer)
             browser_tools = BrowserTools(driver)
 
             gateway.register_tool(
@@ -292,10 +303,16 @@ def handle_run(args: argparse.Namespace) -> int:
                 )
             )
         except Exception as e:
-            print(f"Note: Running without live browser ({e})")
+            if playwright_ctx:
+                try:
+                    playwright_ctx.stop()
+                except Exception:
+                    pass
+            print(f"Error: Failed to initialize browser: {e}. Run 'playwright install chromium' to install browser binaries.", file=sys.stderr)
+            return 1
 
         # Wire HTTP tool
-        http_tool = HttpTool()
+        http_tool = HttpTool(allowlist=allowlist)
         gateway.register_tool(
             ToolDefinition(
                 name="http_request",
@@ -333,14 +350,52 @@ def handle_run(args: argparse.Namespace) -> int:
     # Save findings JSON
     findings_path = out_dir / "findings.json"
     with open(findings_path, "w", encoding="utf-8") as f:
-        json.dump([finding.model_dump() for finding in result.findings], f, indent=2)
+        json.dump([scrubber.scrub(finding.model_dump()) for finding in result.findings], f, indent=2)
 
-    generate_report(result, report_path)
+    generate_report(result, report_path, scrubber=scrubber)
     print(f"Run completed. Actions: {result.actions_count}, Findings: {len(result.findings)}")
     print(f"Trace saved to {trace_path}")
     print(f"Findings saved to {findings_path}")
     print(f"Report saved to {report_path}")
     return 0
+
+
+def _save_score_json(run_dir: Path, target_type: str, report: Any, findings: List[Any], is_held_out: bool = False) -> None:
+    score_data = {
+        "run_id": run_dir.name,
+        "target_type": target_type,
+        "recall": report.recall,
+        "recall_pct": round(report.recall * 100.0, 1),
+        "total_defects": report.total_defects,
+        "matched_defects": sorted(list(report.matched_defects)),
+        "matched_count": len(report.matched_defects),
+        "unmatched_findings_count": len(report.unmatched_findings),
+        "replay_rate": getattr(report, "replay_rate", 1.0),
+        "precision": (len(report.matched_defects) / len(findings)) if findings else 1.0,
+        "unsupported_findings": sum(1 for f in findings if not f.evidence),
+        "is_held_out": is_held_out,
+        "actions": 0,
+        "tokens": 0,
+    }
+    trace_path = run_dir / "trace.jsonl"
+    if trace_path.exists():
+        actions_cnt = 0
+        tokens_cnt = 0
+        try:
+            with open(trace_path, "r", encoding="utf-8") as tf:
+                for line in tf:
+                    if not line.strip():
+                        continue
+                    entry = json.loads(line)
+                    if entry.get("event") == "tool_call":
+                        actions_cnt += 1
+                    tokens_cnt += entry.get("tokens", entry.get("total_tokens", 0))
+            score_data["actions"] = actions_cnt
+            score_data["tokens"] = tokens_cnt
+        except Exception:
+            pass
+    with open(run_dir / "score.json", "w", encoding="utf-8") as sf:
+        json.dump(score_data, sf, indent=2)
 
 
 def handle_score(args: argparse.Namespace) -> int:
@@ -357,7 +412,104 @@ def handle_score(args: argparse.Namespace) -> int:
         raw_findings = json.load(f)
 
     findings = [Finding.model_validate(rf) for rf in raw_findings]
+
+    # Auto-detect target_type if not explicitly passed
+    target_type = getattr(args, "target_type", None)
+    if not target_type:
+        trace_path = run_dir / "trace.jsonl"
+        if trace_path.exists():
+            try:
+                with open(trace_path, "r", encoding="utf-8") as tf:
+                    first_line = tf.readline()
+                    if "localhost:3000" in first_line or "juice" in first_line.lower():
+                        target_type = "juice_shop"
+            except Exception:
+                pass
+        if not target_type:
+            for f in findings:
+                for ev in f.evidence:
+                    url = ev.metadata.get("url", "")
+                    content = str(ev.content)
+                    if "localhost:3000" in url or "localhost:3000" in content or "juice-sh.op" in content:
+                        target_type = "juice_shop"
+                        break
+                if target_type:
+                    break
+        if not target_type:
+            target_type = "own_site"
+
     harness = ScoringHarness(args.ground_truth)
+
+    if target_type == "juice_shop":
+        from benchmark.scoring.juice_shop import JuiceShopScoreboardReader
+        from benchmark.scoring.harness import _matches_juice_shop_challenge
+
+        scoreboard_url = getattr(args, "scoreboard_url", "http://localhost:3000/api/Challenges")
+        reader = JuiceShopScoreboardReader(base_url=scoreboard_url)
+        challenges = reader.fetch_challenges()
+        report = harness.score(
+            findings=findings,
+            target_type="juice_shop",
+            scoreboard_challenges=challenges,
+        )
+
+        solved_challenges = [c for c in challenges if isinstance(c, dict) and c.get("solved") is True]
+        matched_map = {}
+        for finding in findings:
+            for sc in solved_challenges:
+                if _matches_juice_shop_challenge(finding, sc):
+                    sc_name = sc.get("name", sc.get("key", "Unknown"))
+                    matched_map[finding.id] = sc_name
+                    break
+
+        if args.compare:
+            comp_dir = Path(args.compare)
+            comp_findings_path = comp_dir / "findings.json"
+            if not comp_findings_path.exists():
+                print(f"Error: {comp_findings_path} does not exist in comparison run directory.", file=sys.stderr)
+                return 1
+
+            with open(comp_findings_path, "r", encoding="utf-8") as f:
+                comp_raw = json.load(f)
+            comp_findings = [Finding.model_validate(rf) for rf in comp_raw]
+            report2 = harness.score(
+                findings=comp_findings,
+                target_type="juice_shop",
+                scoreboard_challenges=challenges,
+            )
+
+            print("\n================== RUN COMPARISON (JUICE SHOP) ==================")
+            print(f"Scoreboard API: {scoreboard_url}")
+            print("-" * 52)
+            print(f"{'Metric':<25} | {'Run 1':<12} | {'Run 2':<12}")
+            print("-" * 52)
+            print(f"{'Total Findings':<25} | {len(findings):<12} | {len(comp_findings):<12}")
+            print(f"{'Matched Defects':<25} | {len(report.matched_defects):<12} | {len(report2.matched_defects):<12}")
+            print(f"{'Recall':<25} | {report.recall*100:>11.1f}% | {report2.recall*100:>11.1f}%")
+            print(f"{'Unmatched Findings':<25} | {len(report.unmatched_findings):<12} | {len(report2.unmatched_findings):<12}")
+            print("-" * 52)
+            print(f"Run 1 Matched: {sorted(list(report.matched_defects))}")
+            print(f"Run 2 Matched: {sorted(list(report2.matched_defects))}")
+            print("==================================================================")
+            return 0
+
+        print("================ JUICE SHOP SCORING REPORT ================")
+        print(f"Target: OWASP Juice Shop")
+        print(f"Scoreboard API: {scoreboard_url}")
+        print(f"Total Challenges on Scoreboard: {report.total_defects}")
+        print(f"Solved Challenges (Ground Truth): {report.matched_defects} ({len(report.matched_defects)})")
+        print(f"Recall: {report.recall:.2%}")
+        print(f"Run Findings Evaluated: {len(findings)}")
+        print(f"Matched Findings: {len(findings) - len(report.unmatched_findings)}")
+        for fid, cname in matched_map.items():
+            print(f"  • {fid} verified against challenge: '{cname}'")
+        print(f"Unmatched Findings (Precision Triage): {len(report.unmatched_findings)}")
+        for uf in report.unmatched_findings:
+            print(f"  • {uf.id}: {uf.summary}")
+        print("===========================================================")
+        _save_score_json(run_dir, target_type, report, findings, is_held_out=False)
+        return 0
+
     report = harness.score(findings=findings, include_held_out=args.include_held_out)
 
     if args.compare:
@@ -396,93 +548,134 @@ def handle_score(args: argparse.Namespace) -> int:
     print(f"Recall: {report.recall:.2%}")
     print(f"Unmatched Findings (Precision Triage): {len(report.unmatched_findings)}")
     print("================================================")
+    _save_score_json(run_dir, target_type, report, findings, is_held_out=bool(getattr(args, "include_held_out", False)))
     return 0
 
 
 def handle_results(args: argparse.Namespace) -> int:
-    results_data = {
-        "configurations": [
-            {
-                "name": "Baseline Agent (3 runs)",
-                "scope": "Tuning Set (5)",
-                "runs": 3,
-                "recall_pct": 60.0,
-                "recall_ratio": "3/5",
-                "recall_spread": "±0.0%",
-                "replay_rate_pct": 100.0,
-                "precision_pct": 100.0,
-                "unsupported_findings": 0,
-                "avg_actions": 14.3,
-                "actions_spread": "±1.5",
-                "avg_tokens": 18450,
-                "tokens_spread": "±1,200",
-                "matched_defects": ["DEFECT-001", "DEFECT-002", "DEFECT-003"],
-            },
-            {
-                "name": "Multi-Agent (3 runs)",
-                "scope": "Tuning Set (5)",
-                "runs": 3,
-                "recall_pct": 80.0,
-                "recall_ratio": "4/5",
-                "recall_spread": "±0.0%",
-                "replay_rate_pct": 100.0,
-                "precision_pct": 100.0,
-                "unsupported_findings": 0,
-                "avg_actions": 21.0,
-                "actions_spread": "±2.0",
-                "avg_tokens": 34200,
-                "tokens_spread": "±2,500",
-                "matched_defects": ["DEFECT-001", "DEFECT-002", "DEFECT-003", "DEFECT-004"],
-            },
-            {
-                "name": "Juice Shop (3 runs)",
-                "scope": "OWASP (3)",
-                "runs": 3,
-                "recall_pct": 66.7,
-                "recall_ratio": "2/3",
-                "recall_spread": "±0.0%",
-                "replay_rate_pct": 100.0,
-                "precision_pct": 100.0,
-                "unsupported_findings": 0,
-                "avg_actions": 18.0,
-                "actions_spread": "±1.8",
-                "avg_tokens": 26800,
-                "tokens_spread": "±1,900",
-                "matched_defects": ["Error Handling", "Login Admin"],
-            },
-        ],
-        "held_out": {
-            "name": "Multi-Agent (Held-Out)",
-            "scope": "Held-Out (3)",
-            "runs": 1,
-            "recall_pct": 66.7,
-            "recall_ratio": "2/3",
-            "recall_spread": "N/A (single run)",
-            "replay_rate_pct": 100.0,
-            "precision_pct": 100.0,
-            "unsupported_findings": 0,
-            "avg_actions": 23.0,
-            "actions_spread": "0",
-            "avg_tokens": 37100,
-            "tokens_spread": "0",
-            "matched_defects": ["DEFECT-006", "DEFECT-007"],
-        },
-    }
+    runs_dir = Path(getattr(args, "runs_dir", "runs"))
+    if not runs_dir.exists():
+        print("no scored runs found", file=sys.stderr)
+        return 1
 
-    if getattr(args, "include_held_out", False):
-        all_configs = results_data["configurations"] + [results_data["held_out"]]
-    else:
-        all_configs = results_data["configurations"]
+    score_files = list(runs_dir.glob("**/score.json"))
+    if not score_files:
+        print("no scored runs found", file=sys.stderr)
+        return 1
+
+    configs_data: Dict[str, List[Dict[str, Any]]] = {}
+    for sf in score_files:
+        try:
+            with open(sf, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            continue
+
+        rel_parts = sf.relative_to(runs_dir).parts
+        if len(rel_parts) >= 2:
+            cfg_name = rel_parts[0]
+        else:
+            cfg_name = data.get("configuration", data.get("config", sf.parent.name))
+
+        if cfg_name not in configs_data:
+            configs_data[cfg_name] = []
+        configs_data[cfg_name].append(data)
+
+    if not configs_data:
+        print("no scored runs found", file=sys.stderr)
+        return 1
+
+    aggregated = []
+    include_held_out = getattr(args, "include_held_out", False)
+
+    for cfg_name, runs in configs_data.items():
+        is_held_out = any(r.get("is_held_out", False) for r in runs) or "held_out" in cfg_name.lower()
+        if is_held_out and not include_held_out:
+            continue
+
+        n_runs = len(runs)
+        recalls = []
+        for r in runs:
+            rec = r.get("recall", 0.0)
+            if rec <= 1.0 and "recall_pct" not in r:
+                recalls.append(rec * 100.0)
+            else:
+                recalls.append(r.get("recall_pct", rec * 100.0 if rec <= 1.0 else rec))
+
+        avg_recall = sum(recalls) / n_runs if n_runs else 0.0
+        if n_runs > 1:
+            spread_val = (max(recalls) - min(recalls)) / 2.0
+            recall_spread = f"±{spread_val:.1f}%"
+        else:
+            recall_spread = "N/A (single run)"
+
+        total_defects = max((r.get("total_defects", 0) for r in runs), default=0)
+        matched_counts = [len(r.get("matched_defects", [])) if "matched_defects" in r else r.get("matched_count", 0) for r in runs]
+        avg_matched = sum(matched_counts) / n_runs if n_runs else 0
+        recall_ratio = f"{int(round(avg_matched))}/{total_defects}" if total_defects else f"{int(round(avg_matched))}"
+
+        replay_rates = []
+        for r in runs:
+            rr = r.get("replay_rate", r.get("replay_rate_pct", 0.0))
+            if rr <= 1.0:
+                rr *= 100.0
+            replay_rates.append(rr)
+        avg_replay = sum(replay_rates) / n_runs if n_runs else 0.0
+
+        precisions = []
+        for r in runs:
+            p = r.get("precision", r.get("precision_pct", 1.0))
+            if p <= 1.0:
+                p *= 100.0
+            precisions.append(p)
+        avg_precision = sum(precisions) / n_runs if n_runs else 100.0
+
+        unsupported = sum(r.get("unsupported_findings", 0) for r in runs)
+
+        actions_list = [r.get("actions", r.get("avg_actions", 0)) for r in runs]
+        avg_actions = sum(actions_list) / n_runs if n_runs else 0.0
+        if n_runs > 1:
+            act_spread = f"±{(max(actions_list) - min(actions_list)) / 2.0:.1f}"
+        else:
+            act_spread = "0"
+
+        tokens_list = [r.get("tokens", r.get("avg_tokens", 0)) for r in runs]
+        avg_tokens = int(sum(tokens_list) / n_runs) if n_runs else 0
+        if n_runs > 1:
+            tok_spread = f"±{int((max(tokens_list) - min(tokens_list)) / 2.0):,}"
+        else:
+            tok_spread = "0"
+
+        all_matched = sorted(list({d for r in runs for d in r.get("matched_defects", [])}))
+        scope = f"Tuning ({total_defects})" if not is_held_out else f"Held-Out ({total_defects})"
+
+        aggregated.append({
+            "name": cfg_name,
+            "scope": scope,
+            "runs": n_runs,
+            "recall_pct": round(avg_recall, 1),
+            "recall_ratio": recall_ratio,
+            "recall_spread": recall_spread,
+            "replay_rate_pct": round(avg_replay, 1),
+            "precision_pct": round(avg_precision, 1),
+            "unsupported_findings": unsupported,
+            "avg_actions": round(avg_actions, 1),
+            "actions_spread": act_spread,
+            "avg_tokens": avg_tokens,
+            "tokens_spread": tok_spread,
+            "matched_defects": all_matched,
+            "is_held_out": is_held_out,
+        })
+
+    if not aggregated:
+        print("no scored runs found", file=sys.stderr)
+        return 1
 
     if getattr(args, "format", "table") == "json":
         output = {
-            "benchmark_results": all_configs,
-            "include_held_out": getattr(args, "include_held_out", False),
-            "summary": {
-                "headline": "Multi-agent architecture achieves +20.0% recall improvement on tuning defects over single-agent baseline.",
-                "unsupported_findings_total": 0,
-                "replay_rate_mean": 100.0,
-            },
+            "benchmark_results": aggregated,
+            "include_held_out": include_held_out,
+            "runs_evaluated": sum(c["runs"] for c in aggregated),
         }
         print(json.dumps(output, indent=2))
         return 0
@@ -492,7 +685,7 @@ def handle_results(args: argparse.Namespace) -> int:
     print("=" * 105)
     print(f"{'Configuration':<25} | {'Scope':<14} | {'Recall (Spread)':<20} | {'Replay':<8} | {'Precision':<9} | {'Actions':<8} | {'Tokens':<9}")
     print("-" * 105)
-    for c in all_configs:
+    for c in aggregated:
         rec_str = f"{c['recall_pct']:.1f}% ({c['recall_ratio']}) {c['recall_spread']}"
         print(
             f"{c['name']:<25} | {c['scope']:<14} | {rec_str:<20} | "
@@ -500,11 +693,7 @@ def handle_results(args: argparse.Namespace) -> int:
             f"{c['avg_actions']:>6.1f}   | {c['avg_tokens']:>8,}"
         )
     print("-" * 105)
-    print("Key Evaluation Findings:")
-    print("  • Multi-Agent split yields +20.0% higher recall on tuning set (80.0% vs 60.0%).")
-    if getattr(args, "include_held_out", False):
-        print("  • Held-Out generalization: 66.7% recall on previously unseen defects (meets PRD target >=50%).")
-    print("  • Replay rate is 100.0% across all confirmed findings (0 unsupported findings).")
+    print(f"Total runs evaluated: {sum(c['runs'] for c in aggregated)}")
     print("=" * 105 + "\n")
     return 0
 

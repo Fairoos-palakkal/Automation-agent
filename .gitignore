@@ -1,9 +1,15 @@
 # Environments & secrets
 .env
 *.env
+.env.*
+!.env.example
 .venv/
 env/
 venv/
+
+# OS artifacts
+.DS_Store
+Thumbs.db
 
 # Python cache & build
 __pycache__/
@@ -19,10 +25,15 @@ build/
 htmlcov/
 
 # Local run outputs & artifacts
+runs/
 run_output/
 demo_run/
 noshery_run/
 test_noshery_run/
+juice_shop_run/
 artifacts/*.png
 *.png
+
+# IDE & Editor configs
 .vscode/
+.idea/

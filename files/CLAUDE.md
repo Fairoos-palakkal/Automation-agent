@@ -1,6 +1,36 @@
-# CLAUDE.md
+# Matt Pocock's Agent Skills — Installed
 
-Agentic QA Command Center: a CLI-first system where LLM agents explore a web Target black-box, capture Evidence, and report Findings whose Verdicts are decided by deterministic code. Read `PRD.md` for scope and phases, and `CONTEXT.md` for vocabulary. Record hard-to-reverse decisions as short ADRs in `docs/adr/`.
+27 engineering and productivity skills from [mattpocock/skills](https://github.com/mattpocock/skills)
+are installed in `.agents/skills/`. See `.agents/AGENTS.md` for the full skill map.
+
+## Agent skills
+
+### Issue tracker
+
+Local markdown files in `.scratch/`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Canonical roles (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context (`files/CONTEXT.md` / `GLOSSARY.md` and `docs/adr/`). See `docs/agents/domain.md`.
+
+---
+
+# Project Rules
+
+Agentic QA Command Center: a CLI-first system where LLM agents explore a web Target black-box, capture Evidence, and report Findings whose Verdicts are decided by deterministic code.
+
+> **Documentation Directory Rule:**
+> All project documentation files (`PRD.md`, `CONTEXT.md`, `progress.md`, `PROJECT_PORTFOLIO.md`, etc.) are located in the `files/` directory. Always look in the `files/` directory for everything:
+> - `files/PRD.md` for scope, architecture, and phase roadmaps
+> - `files/CONTEXT.md` for canonical domain vocabulary
+> - `files/progress.md` for implementation progress and phase status
+> - `files/PROJECT_PORTFOLIO.md` for portfolio documentation
+
+Record hard-to-reverse decisions as short ADRs in `docs/adr/`.
 
 ## Non-negotiable rules
 
@@ -11,7 +41,7 @@ Agentic QA Command Center: a CLI-first system where LLM agents explore a web Tar
 5. **Target allowlist is mandatory.** Only Own Site and the local Juice Shop instance.
 6. **Secrets come from environment variables only.** Scrub them from traces. Never commit `.env` or keys.
 7. **Pin the model in the bench profile.** Record served model ID and token counts in every trace entry.
-8. **Use the terms in `CONTEXT.md`.** Do not introduce synonyms (e.g. "evaluator", "bug report").
+8. **Use the terms in `files/CONTEXT.md`.** Do not introduce synonyms (e.g. "evaluator", "bug report").
 
 ## Workflow: TDD
 

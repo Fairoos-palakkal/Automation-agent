@@ -43,3 +43,51 @@ class TestReportGenerator:
         assert "Broken button in navbar" in content
         assert "FAIL" in content
         assert "artifacts/shot1.png" in content
+
+    def test_report_escapes_xss_in_evidence_and_summary(self, tmp_path):
+        """Evidence content and finding summary containing HTML/script tags are safely escaped."""
+        output_file = tmp_path / "xss_report.html"
+        xss_finding = Finding(
+            id="F-XSS",
+            summary="<script>alert('xss-summary')</script>",
+            evidence=[Evidence(type=EvidenceType.DOM_SNAPSHOT, content="<script>alert('xss-ev')</script><img src=x onerror=alert(1)>")],
+            verdict=Verdict(type=VerdictType.FAIL, reason="<b onmouseover=alert(1)>failed</b>"),
+        )
+        result = RunResult(findings=[xss_finding], actions_count=1, tokens_used=50)
+
+        generate_report(result, output_path=output_file)
+        content = output_file.read_text(encoding="utf-8")
+
+        # Must not contain unescaped script or img injection
+        assert "<script>alert('xss-summary')</script>" not in content
+        assert "<script>alert('xss-ev')</script>" not in content
+        assert "<img src=x onerror=alert(1)>" not in content
+        # Must contain HTML-escaped representations
+        assert "&lt;script&gt;alert('xss-summary')&lt;/script&gt;" in content or "&lt;script&gt;alert(&#x27;xss-summary&#x27;)&lt;/script&gt;" in content
+        assert "&lt;script&gt;alert('xss-ev')&lt;/script&gt;" in content or "&lt;script&gt;alert(&#x27;xss-ev&#x27;)&lt;/script&gt;" in content
+
+    def test_report_has_csp_meta_tag(self, tmp_path):
+        """Report HTML includes a Content-Security-Policy meta header."""
+        output_file = tmp_path / "csp_report.html"
+        result = RunResult(findings=[], actions_count=0, tokens_used=0)
+        generate_report(result, output_path=output_file)
+        content = output_file.read_text(encoding="utf-8")
+
+        assert '<meta http-equiv="Content-Security-Policy"' in content
+
+    def test_report_displays_unverified_badge_when_no_verdict(self, tmp_path):
+        """Findings without a verdict display UNVERIFIED badge in report."""
+        output_file = tmp_path / "unverified_report.html"
+        finding = Finding(
+            id="F-999",
+            summary="Potential anomaly found without verification",
+            evidence=[Evidence(type=EvidenceType.CONSOLE_LOG, content="Warning detected in console")],
+            verdict=None,
+        )
+        result = RunResult(findings=[finding], actions_count=1, tokens_used=50)
+        generate_report(result, output_path=output_file)
+        content = output_file.read_text(encoding="utf-8")
+
+        assert "UNVERIFIED" in content
+        assert "F-999" in content
+

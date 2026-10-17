@@ -107,3 +107,69 @@ class TestToolGateway:
         # Grant permission and verify it passes
         gateway.grant_permission("admin_destructive")
         assert gateway.execute("destructive_reset", {}) == "reset complete"
+
+    @pytest.mark.parametrize("bypass_url", [
+        "http://localhost.evil.com",
+        "https://evil.com/?next=localhost",
+        "http://localhost@evil.com/",
+        "http://evil.com/localhost",
+        "javascript:alert(1)",
+        "file:///etc/passwd",
+        "http://127.0.0.1.attacker.com",
+        "http://attacker.com#localhost",
+        "http://localhost:3001",
+    ])
+    def test_gateway_blocks_allowlist_bypasses(self, bypass_url):
+        """Gateway raises TargetNotAllowed on substring/lookalike/redirect/userinfo bypass attempts."""
+        gateway = ToolGateway(allowlist=["localhost:3000", "127.0.0.1:3000"])
+        gateway.register_tool(
+            ToolDefinition(
+                name="navigate",
+                handler=lambda url: f"navigated to {url}",
+                is_url_action=True,
+            )
+        )
+        with pytest.raises(TargetNotAllowed):
+            gateway.execute("navigate", {"url": bypass_url})
+
+    @pytest.mark.parametrize("bypass_url", [
+        "http://localhost.evil.com",
+        "https://evil.com/?next=localhost",
+        "http://localhost@evil.com/",
+        "http://evil.com/localhost",
+        "http://127.0.0.1.evil.com",
+    ])
+    def test_gateway_blocks_standard_allowlist_substring_bypasses(self, bypass_url):
+        """Gateway raises TargetNotAllowed on substring bypasses when allowlist is standard ['localhost', '127.0.0.1']."""
+        gateway = ToolGateway(allowlist=["localhost", "127.0.0.1"])
+        gateway.register_tool(
+            ToolDefinition(
+                name="navigate",
+                handler=lambda url: f"navigated to {url}",
+                is_url_action=True,
+            )
+        )
+        with pytest.raises(TargetNotAllowed):
+            gateway.execute("navigate", {"url": bypass_url})
+
+
+    @pytest.mark.parametrize("valid_url", [
+        "http://localhost:3000",
+        "http://localhost:3000/cart.html",
+        "http://LOCALHOST:3000/index.html",
+        "http://localhost.:3000/catalog",
+        "http://127.0.0.1:3000/api",
+    ])
+    def test_gateway_allows_valid_exact_host_urls(self, valid_url):
+        """Gateway allows exact host:port matches including uppercase and trailing dot."""
+        gateway = ToolGateway(allowlist=["localhost:3000", "127.0.0.1:3000"])
+        gateway.register_tool(
+            ToolDefinition(
+                name="navigate",
+                handler=lambda url: f"navigated to {url}",
+                is_url_action=True,
+            )
+        )
+        result = gateway.execute("navigate", {"url": valid_url})
+        assert "navigated to" in result
+

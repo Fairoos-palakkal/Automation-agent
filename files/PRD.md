@@ -14,7 +14,7 @@ It is built in two stages and measured: first a single **Baseline Agent** (Day 1
 
 ## 2. Non-goals
 
-Regression store, GitHub Actions / CI, ZAP integration, SSRF controls beyond the target allowlist, plugin system, live dashboard, RBAC, hosted SaaS, multiple provider-specific adapters, arbitrary-target security scanning, an LLM evaluation agent at runtime.
+Regression store, GitHub Actions / CI, ZAP integration, SSRF controls beyond the target allowlist, plugin system, RBAC, hosted SaaS, multiple provider-specific adapters, an LLM evaluation agent at runtime. (Note: Live dashboard and user-specified target mode were initially non-goals but have been adopted into the roadmap under ADR-0005 with strict allowlist guards).
 
 ## 3. Principles
 
@@ -130,9 +130,13 @@ Decided (2026-10-14):
 - **D6 Shared state between agents:** Findings + Evidence references only, never transcripts.
 - Verdicts are deterministic and there is no runtime evaluation agent (see `docs/adr/0001-deterministic-verdicts-no-evaluation-agent.md`).
 
-Still open:
+Decided (2026-10-17, Phase 4 Alignment):
 
-- **D4 Juice Shop Objectives:** pick 3 before Phase 3. Suggested: authentication, basket/checkout, search/input handling.
+- **D4 Juice Shop Objectives:** Authentication, Basket/Checkout, and Search/Input Handling.
+- **Honesty Policy (ADR-0004):** All benchmark results published in README, PROJECT_PORTFOLIO, or CV must be computed by `qa-cc results` from verified Run Directories (`runs/<config>/<run_id>/score.json`) citing run ID and commit hash. No fabricated or literal tables.
+- **Held-out Re-seal:** Replace leaked DEFECT-007; split `defects.tuning.json` from sealed held-out file, committing only the SHA-256 hash of the held-out file (`defects.held_out.hash`).
+- **Live Dashboard & User-Specified Target Mode (ADR-0005):** Formally incorporated into the roadmap. Requires explicit per-target allowlist confirmation and route interception to prevent off-target navigation.
+- **Execution & Token Strategy:** Truthful testing with TDD, FakeProvider/cassettes for unit tests, T-19 context pruning, and API top-up (D5) as needed when running real benchmarks.
 
 ## 14. Suggested repo layout
 

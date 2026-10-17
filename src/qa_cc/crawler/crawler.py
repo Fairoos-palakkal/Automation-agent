@@ -4,6 +4,8 @@ import re
 from typing import Any, Callable, Dict, List, Optional, Set
 from urllib.parse import urljoin, urlparse
 
+from qa_cc.gateway.allowlist import is_url_allowed
+
 
 @dataclass
 class Inventory:
@@ -37,12 +39,7 @@ class Crawler:
         self.allowlist = allowlist or ["localhost", "127.0.0.1"]
 
     def _is_allowed(self, url: str) -> bool:
-        parsed = urlparse(url)
-        hostname = parsed.netloc or parsed.hostname or ""
-        for allowed in self.allowlist:
-            if allowed in hostname or (not hostname and allowed in parsed.path) or (allowed in url):
-                return True
-        return False
+        return is_url_allowed(url, self.allowlist)
 
     def crawl(self, start_url: str, max_pages: int = 50) -> Inventory:
         visited: Set[str] = set()

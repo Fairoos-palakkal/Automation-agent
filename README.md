@@ -2,7 +2,7 @@
 
 > **Autonomous web application testing and defect discovery powered by multi-agent LLM exploration and deterministic verdict enforcement.**
 
-`qa_cc` is an agentic QA framework designed to autonomously explore web applications, execute exploratory and regression testing, and capture cryptographically traced defect findings backed by concrete DOM, network, and console evidence.
+`qa_cc` is an agentic QA framework designed to autonomously explore web applications, execute exploratory and regression testing, and capture attributable defect findings backed by concrete DOM, network, and console evidence.
 
 ---
 
@@ -108,23 +108,19 @@
 The primary hypothesis evaluated in this project is:
 > *Does decomposing autonomous QA into specialized role-specific agents (`Planner` + `BrowserAgent` + `APIAgent`) improve defect recall and mitigate context bloat compared to a single monolithic `BaselineAgent`, and at what cost?*
 
-To answer this empirically, 3 benchmark runs were executed per configuration on the frozen **Own Site** benchmark (5 tuning defects), followed by held-out evaluation (3 unseen defects) and OWASP Juice Shop validation.
+### Running and Aggregating Benchmarks
 
-### Comparative Results Table
+Per **ADR-0004 (Honesty Policy)**, all published benchmark metrics are computed directly by the CLI results aggregator from completed run artifacts (`runs/<config>/<run_id>/score.json`), citing run IDs and commit hashes. No hard-coded benchmark literals or manual estimations are permitted.
 
-| Configuration | Scope | Recall (Mean ± Spread) | Replay Rate | Precision | Avg Actions | Avg Tokens | Unsupported Findings |
-|---|---|---|---|---|---|---|---|
-| **Baseline Agent** (3 runs) | Tuning Set (5) | **60.0%** (3/5) ±0.0% | 100.0% | 100.0% | 14.3 ± 1.5 | 18,450 ± 1,200 | **0** |
-| **Multi-Agent Orchestrator** (3 runs) | Tuning Set (5) | **80.0%** (4/5) ±0.0% | 100.0% | 100.0% | 21.0 ± 2.0 | 34,200 ± 2,500 | **0** |
-| **Multi-Agent Held-Out** (1 run) | Held-Out Set (3) | **66.7%** (2/3) — | 100.0% | 100.0% | 23.0 | 37,100 | **0** |
-| **OWASP Juice Shop** (3 runs) | OWASP Challenges (3) | **66.7%** (2/3) ±0.0% | 100.0% | 100.0% | 18.0 ± 1.8 | 26,800 ± 1,900 | **0** |
+To view benchmark results aggregated dynamically across runs:
 
-### Key Takeaways
+```bash
+python -m qa_cc results --format table
+# Or include held-out runs:
+python -m qa_cc results --format table --include-held-out
+```
 
-1. **+20.0% Recall Improvement:** Multi-agent decomposition achieved 80.0% recall on the tuning set vs 60.0% for the baseline agent. Decomposing objectives into targeted browser vs API subtasks allowed deeper state space exploration.
-2. **Held-Out Generalization (66.7%):** Multi-agent sustained 66.7% recall on previously unseen held-out defects (`DEFECT-006` and `DEFECT-007`), meeting the PRD gate criterion of $\ge 50\%$.
-3. **Zero Unsupported Findings:** In accordance with PRD principles, every confirmed defect in published runs is supported by concrete Evidence and verified via deterministic assertion replay (100.0% replay rate, 0 hallucinations).
-4. **Context Cost Tradeoff:** Multi-agent required ~1.85x token overhead (34.2K vs 18.5K tokens) due to planner decomposition and sub-agent handoffs, but eliminated context saturation loops.
+When runs are executed via `qa_cc run` and scored via `qa_cc score`, their metrics (recall, replay rate, precision, action efficiency, and token usage) are persisted to `runs/<config>/<run_id>/score.json`. When multiple runs exist for a configuration, `qa_cc results` computes the mean and spread across runs.
 
 ---
 
@@ -200,12 +196,9 @@ Create a `.env` file in the project root:
 
 ```ini
 # Primary LLM Endpoint (B.AI / OmniRoute / OpenAI compatible)
-BAI_API_KEY=your_api_key_here
-BAI_BASE_URL=https://api.omniroute.ai/v1
-BAI_MODEL_ID=qwen/qwen-2.5-72b-instruct
-
-# Optional: Secondary model for challenger / multi-agent evaluation
-BAI_SECONDARY_MODEL_ID=google/gemini-2.5-flash
+LLM_API_KEY=your_api_key_here
+LLM_BASE_URL=https://api.b.ai/v1
+LLM_MODEL=Qwen3.8-Flash
 ```
 
 ---
@@ -227,7 +220,7 @@ python -m qa_cc run \
 Outputs generated in `./run_output`:
 - `report.html`: Interactive dark-mode dashboard displaying findings, severity badges, and DOM traces.
 - `findings.json`: Structured list of findings with complete evidence attachments.
-- `trace.jsonl`: Cryptographic action-observation audit log with redacted secrets.
+- `trace.jsonl`: Action-observation audit log with redacted secrets.
 
 ### 2. Multi-Agent Orchestrated Exploration
 

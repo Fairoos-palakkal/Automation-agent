@@ -26,6 +26,7 @@ class RunResult:
     loop_recovery_triggered: bool = False
     trace_path: Optional[str] = None
     summary: str = ""
+    is_mock: bool = False
 
 
 DEFAULT_TOOLS = [

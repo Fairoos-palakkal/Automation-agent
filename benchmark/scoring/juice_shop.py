@@ -8,7 +8,10 @@ class JuiceShopScoreboardReader:
     """Reads and parses solved challenges from OWASP Juice Shop /api/Challenges."""
 
     def __init__(self, base_url: str = "http://localhost:3000"):
-        self.base_url = base_url.rstrip("/")
+        url_clean = base_url.rstrip("/")
+        if url_clean.endswith("/api/Challenges"):
+            url_clean = url_clean[:-len("/api/Challenges")].rstrip("/")
+        self.base_url = url_clean
 
     def fetch_challenges(self, url: Optional[str] = None) -> List[Dict[str, Any]]:
         """Fetch challenges list from /api/Challenges endpoint."""

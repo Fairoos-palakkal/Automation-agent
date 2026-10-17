@@ -14,6 +14,9 @@ from pathlib import Path
 from typing import Any
 
 
+from qa_cc.security.scrubber import Scrubber
+
+
 class TraceWriter:
     """Writes trace entries to a JSONL file.
 
@@ -21,6 +24,7 @@ class TraceWriter:
         path: Destination file path. Parent directories are created if absent.
         secret_env_vars: Names of environment variables whose values should be
                          scrubbed from all trace output.
+        scrubber: Optional pre-configured Scrubber instance.
     """
 
     SCRUB_PLACEHOLDER = "[SCRUBBED]"
@@ -29,14 +33,17 @@ class TraceWriter:
         self,
         path: Path | str,
         secret_env_vars: list[str] | None = None,
+        scrubber: Scrubber | None = None,
     ) -> None:
         self._path = Path(path)
         self._path.parent.mkdir(parents=True, exist_ok=True)
+        self.scrubber = scrubber or Scrubber(secret_env_vars=secret_env_vars)
         self._secret_values: set[str] = set()
         for var in secret_env_vars or []:
             value = os.environ.get(var)
             if value:
                 self._secret_values.add(value)
+                self.scrubber.add_secret(value)
 
     def record(self, entry: dict[str, Any]) -> None:
         """Append one entry to the JSONL trace file.
@@ -90,25 +97,4 @@ class TraceWriter:
 
     def _scrub(self, obj: Any) -> Any:
         """Recursively replace secret values with the scrub placeholder."""
-        if hasattr(obj, "model_dump") and callable(obj.model_dump):
-            obj = obj.model_dump()
-        elif hasattr(obj, "dict") and callable(obj.dict):
-            obj = obj.dict()
-
-        if not self._secret_values:
-            if isinstance(obj, dict):
-                return {k: self._scrub(v) for k, v in obj.items()}
-            if isinstance(obj, list):
-                return [self._scrub(item) for item in obj]
-            return obj
-
-        if isinstance(obj, str):
-            result = obj
-            for secret in self._secret_values:
-                result = result.replace(secret, self.SCRUB_PLACEHOLDER)
-            return result
-        if isinstance(obj, dict):
-            return {k: self._scrub(v) for k, v in obj.items()}
-        if isinstance(obj, list):
-            return [self._scrub(item) for item in obj]
-        return obj
+        return self.scrubber.scrub(obj)

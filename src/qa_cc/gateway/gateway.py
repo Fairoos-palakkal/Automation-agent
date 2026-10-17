@@ -13,6 +13,8 @@ from typing import Any, Callable, Dict, List, Optional, Set
 from urllib.parse import urlparse
 
 from qa_cc.trace.writer import TraceWriter
+from qa_cc.gateway.allowlist import is_url_allowed
+from qa_cc.security.scrubber import Scrubber
 
 
 class ToolNotFound(Exception):
@@ -47,11 +49,13 @@ class ToolGateway:
         granted_permissions: Optional[Set[str]] = None,
         trace_writer: Optional[TraceWriter] = None,
         secret_keys: Optional[List[str]] = None,
+        scrubber: Optional[Scrubber] = None,
     ):
         self.allowlist = allowlist or ["localhost", "127.0.0.1"]
         self.granted_permissions = set(granted_permissions or [])
         self.trace_writer = trace_writer
         self.secret_keys = secret_keys or []
+        self.scrubber = scrubber or Scrubber(secret_env_vars=self.secret_keys)
         self._registry: Dict[str, ToolDefinition] = {}
 
     def register_tool(self, tool_def: ToolDefinition) -> None:
@@ -64,38 +68,10 @@ class ToolGateway:
         self.granted_permissions.discard(permission)
 
     def _is_url_allowed(self, url: str) -> bool:
-        if not self.allowlist:
-            return False
-        parsed = urlparse(url)
-        hostname = parsed.hostname or ""
-        path = parsed.path or ""
-
-        for allowed in self.allowlist:
-            if allowed in hostname or (not hostname and allowed in path) or (allowed in url):
-                return True
-        return False
+        return is_url_allowed(url, self.allowlist)
 
     def _scrub_obj(self, obj: Any) -> Any:
-        secrets = [os.environ.get(k) for k in self.secret_keys if os.environ.get(k)] if self.secret_keys else []
-
-        def _scrub_val(val: Any) -> Any:
-            if hasattr(val, "model_dump") and callable(val.model_dump):
-                val = val.model_dump()
-            elif hasattr(val, "dict") and callable(val.dict):
-                val = val.dict()
-            if isinstance(val, str):
-                s = val
-                for sec in secrets:
-                    if sec and sec in s:
-                        s = s.replace(sec, "[SCRUBBED]")
-                return s
-            if isinstance(val, dict):
-                return {k: _scrub_val(v) for k, v in val.items()}
-            if isinstance(val, list):
-                return [_scrub_val(v) for v in val]
-            return val
-
-        return _scrub_val(obj)
+        return self.scrubber.scrub(obj)
 
     def execute(self, tool_name: str, args: Dict[str, Any]) -> Any:
         if tool_name not in self._registry:

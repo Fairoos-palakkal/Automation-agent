@@ -143,3 +143,34 @@ class TestScoringHarness:
                 expected_model="Qwen3.8-Flash",
                 actual_model="gpt-4o-mini",
             )
+
+    def test_scoring_juice_shop_technical_summaries(self, mock_defects_file):
+        """Juice Shop scoring matches technical defect descriptions (500 SQL error, admin SQLi login)."""
+        harness = ScoringHarness(ground_truth_path=mock_defects_file)
+        challenges = [
+            {"id": 1, "key": "errorHandlingChallenge", "name": "Error Handling", "solved": True},
+            {"id": 2, "key": "scoreBoardChallenge", "name": "Score Board", "solved": False},
+            {"id": 3, "key": "loginAdminChallenge", "name": "Login Admin", "solved": True},
+        ]
+        findings = [
+            Finding(
+                id="F-1",
+                summary="Search endpoint /rest/products/search returns HTTP 500 with exposed SQLite error details when given SQL metacharacters",
+                evidence=[Evidence(type=EvidenceType.DOM_SNAPSHOT, content="500 Error: SQLITE_ERROR: near UNION: syntax error")],
+            ),
+            Finding(
+                id="F-2",
+                summary="SQL Injection authentication bypass on the /rest/user/login endpoint with admin@juice-sh.op",
+                evidence=[Evidence(type=EvidenceType.SCREENSHOT, content="login")],
+            ),
+            Finding(
+                id="F-3",
+                summary="Unrelated UI button alignment is off by 2px",
+                evidence=[Evidence(type=EvidenceType.DOM_SNAPSHOT, content="button")],
+            ),
+        ]
+        report = harness.score(findings=findings, target_type="juice_shop", scoreboard_challenges=challenges)
+        assert len(report.unmatched_findings) == 1
+        assert report.unmatched_findings[0].id == "F-3"
+        assert "Error Handling" in report.matched_defects
+        assert "Login Admin" in report.matched_defects
