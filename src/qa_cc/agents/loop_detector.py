@@ -6,7 +6,7 @@ pairs 3 times, triggers deterministic recovery (re-observe -> try alternate -> t
 from enum import Enum
 import hashlib
 import json
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 
 class RecoveryAction(str, Enum):
