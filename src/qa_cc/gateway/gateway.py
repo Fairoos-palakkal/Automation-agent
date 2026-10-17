@@ -27,6 +27,9 @@ class TargetNotAllowed(Exception):
     pass
 
 
+from pathlib import Path
+
+
 class PermissionRequired(Exception):
     """Raised when an action requires explicit permissions that are not granted."""
     pass
@@ -38,6 +41,7 @@ class ToolDefinition:
     handler: Callable[..., Any]
     is_url_action: bool = False
     required_permission: Optional[str] = None
+    allowed_callers: Optional[Set[str]] = None
     description: str = ""
     parameters: Optional[Dict[str, Any]] = None
 
@@ -50,16 +54,47 @@ class ToolGateway:
         trace_writer: Optional[TraceWriter] = None,
         secret_keys: Optional[List[str]] = None,
         scrubber: Optional[Scrubber] = None,
+        artifacts_dir: Optional[Path | str] = None,
     ):
         self.allowlist = allowlist or ["localhost", "127.0.0.1"]
         self.granted_permissions = set(granted_permissions or [])
         self.trace_writer = trace_writer
         self.secret_keys = secret_keys or []
         self.scrubber = scrubber or Scrubber(secret_env_vars=self.secret_keys)
+        self.artifacts_dir = Path(artifacts_dir) if artifacts_dir else None
+        self._screenshot_counter = 0
         self._registry: Dict[str, ToolDefinition] = {}
 
     def register_tool(self, tool_def: ToolDefinition) -> None:
         self._registry[tool_def.name] = tool_def
+
+    def register_screenshot_tool(
+        self,
+        screenshot_saver: Callable[[str], Any],
+        allowed_callers: Optional[Set[str]] = None,
+    ) -> None:
+        """Register the screenshot tool where gateway owns the output path."""
+        def _handler(**kwargs: Any) -> Dict[str, Any]:
+            self._screenshot_counter += 1
+            step_num = self._screenshot_counter
+            if self.artifacts_dir:
+                self.artifacts_dir.mkdir(parents=True, exist_ok=True)
+                dest = self.artifacts_dir / f"screenshot_{step_num}.png"
+            else:
+                dest = Path(f"artifacts/screenshot_{step_num}.png")
+                dest.parent.mkdir(parents=True, exist_ok=True)
+            saved = screenshot_saver(str(dest))
+            return {"path": str(dest), "saved": saved}
+
+        self.register_tool(
+            ToolDefinition(
+                name="screenshot",
+                handler=_handler,
+                allowed_callers=allowed_callers or {"baseline", "browser"},
+                description="Capture a screenshot Evidence of the current browser page.",
+                parameters={"type": "object", "properties": {}},
+            )
+        )
 
     def grant_permission(self, permission: str) -> None:
         self.granted_permissions.add(permission)
@@ -73,7 +108,7 @@ class ToolGateway:
     def _scrub_obj(self, obj: Any) -> Any:
         return self.scrubber.scrub(obj)
 
-    def execute(self, tool_name: str, args: Dict[str, Any]) -> Any:
+    def execute(self, tool_name: str, args: Dict[str, Any], caller: Optional[str] = None) -> Any:
         result = None
         error = None
         denied = False
@@ -87,7 +122,17 @@ class ToolGateway:
 
             tool_def = self._registry[tool_name]
 
-            # Permission check
+            # Caller permission check
+            if tool_def.allowed_callers is not None and caller is not None:
+                if caller not in tool_def.allowed_callers:
+                    denied = True
+                    denial_reason = (
+                        f"Caller '{caller}' is not authorized to use tool '{tool_name}'. "
+                        f"Allowed callers: {sorted(tool_def.allowed_callers)}"
+                    )
+                    raise PermissionRequired(denial_reason)
+
+            # Explicit permission check
             if tool_def.required_permission and tool_def.required_permission not in self.granted_permissions:
                 denied = True
                 denial_reason = (
@@ -123,6 +168,8 @@ class ToolGateway:
                     "tokens": 0,
                     "ok": error is None,
                 }
+                if caller is not None:
+                    payload["caller"] = caller
                 if error is not None:
                     payload["error"] = error
                 if denied and denial_reason:

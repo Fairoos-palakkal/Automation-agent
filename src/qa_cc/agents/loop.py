@@ -271,7 +271,7 @@ class AgentLoop:
 
                 url_before = current_url
                 try:
-                    res = self.gateway.execute(tool_name, args)
+                    res = self.gateway.execute(tool_name, args, caller=self.agent_name)
                     url_after = current_url
                     if isinstance(res, dict) and "url" in res:
                         current_url = res["url"]

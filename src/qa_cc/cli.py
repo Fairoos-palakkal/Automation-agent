@@ -93,7 +93,12 @@ def handle_run(args: argparse.Namespace) -> int:
         if extra not in allowlist:
             allowlist.append(extra)
 
-    gateway = ToolGateway(allowlist=allowlist, trace_writer=trace_writer, scrubber=scrubber)
+    gateway = ToolGateway(
+        allowlist=allowlist,
+        trace_writer=trace_writer,
+        scrubber=scrubber,
+        artifacts_dir=out_dir,
+    )
 
     browser_instance = None
     playwright_ctx = None
@@ -299,25 +304,26 @@ def handle_run(args: argparse.Namespace) -> int:
                     name="navigate",
                     handler=browser_tools.navigate,
                     is_url_action=True,
+                    allowed_callers={"baseline", "browser"},
                 )
             )
             gateway.register_tool(
                 ToolDefinition(
                     name="click",
                     handler=browser_tools.click,
+                    allowed_callers={"baseline", "browser"},
                 )
             )
             gateway.register_tool(
                 ToolDefinition(
                     name="fill",
                     handler=browser_tools.fill,
+                    allowed_callers={"baseline", "browser"},
                 )
             )
-            gateway.register_tool(
-                ToolDefinition(
-                    name="screenshot",
-                    handler=lambda path=str(out_dir / "screenshot.png"): browser_tools.screenshot(path),
-                )
+            gateway.register_screenshot_tool(
+                browser_tools.screenshot,
+                allowed_callers={"baseline", "browser"},
             )
         except Exception as e:
             if playwright_ctx:
@@ -335,6 +341,7 @@ def handle_run(args: argparse.Namespace) -> int:
                 name="http_request",
                 handler=http_tool.request,
                 is_url_action=True,
+                allowed_callers={"baseline", "api"},
             )
         )
 

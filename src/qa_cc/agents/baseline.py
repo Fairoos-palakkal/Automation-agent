@@ -80,8 +80,7 @@ DEFAULT_TOOLS = [
             "description": "Capture a screenshot Evidence of the current browser page.",
             "parameters": {
                 "type": "object",
-                "properties": {"path": {"type": "string", "description": "Artifact output path for image"}},
-                "required": ["path"],
+                "properties": {},
             },
         },
     },
