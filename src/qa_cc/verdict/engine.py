@@ -238,3 +238,72 @@ class VerdictEngine:
             details={"history": [t.value for t in types], "attempts": reasons},
         )
 
+
+def finalize_verdict(
+    live_verdict: Optional[Verdict],
+    replay_verdict: Optional[Union[Verdict, Any]],
+) -> Verdict:
+    """Deterministically compute final verdict from live assertion and fresh-context replay.
+
+    Invariants (ADR-0001, ADR-0003):
+    1. If replay reproduced the failure (both live and replay are FAIL) -> FAIL.
+    2. If live failed but replay passed (non-reproducible) -> INCONCLUSIVE.
+    3. If either outcome is FLAKY -> FLAKY.
+    4. If replay is absent/incomplete -> INCONCLUSIVE.
+    5. Never upgrades a finding to PASS.
+    """
+    if not live_verdict:
+        return Verdict(
+            type=VerdictType.INCONCLUSIVE,
+            reason="No live assertion verdict available.",
+        )
+
+    if live_verdict.type == VerdictType.FLAKY:
+        return Verdict(
+            type=VerdictType.FLAKY,
+            reason=f"Live assertion was flaky: {live_verdict.reason}",
+            details=live_verdict.details,
+        )
+
+    if replay_verdict is None:
+        return Verdict(
+            type=VerdictType.INCONCLUSIVE,
+            reason="No replay execution available to verify finding.",
+        )
+
+    replay_type = getattr(replay_verdict, "type", None) or getattr(replay_verdict, "final_verdict", None)
+    replay_reason = getattr(replay_verdict, "reason", "")
+
+    if replay_type == VerdictType.FLAKY:
+        return Verdict(
+            type=VerdictType.FLAKY,
+            reason=f"Replay assertion outcome was flaky: {replay_reason}",
+            details=getattr(replay_verdict, "details", {}),
+        )
+
+    if live_verdict.type == VerdictType.FAIL:
+        if replay_type == VerdictType.FAIL:
+            return Verdict(
+                type=VerdictType.FAIL,
+                reason="Defect verified by live assertion and fresh-context replay.",
+                details={"live_reason": live_verdict.reason, "replay_reason": replay_reason},
+            )
+        else:
+            return Verdict(
+                type=VerdictType.INCONCLUSIVE,
+                reason=f"Live check failed but fresh-context replay passed; downgraded to INCONCLUSIVE per ADR-0001/ADR-0003. ({replay_reason})",
+                details={"live_reason": live_verdict.reason, "replay_reason": replay_reason},
+            )
+
+    if live_verdict.type == VerdictType.PASS:
+        return Verdict(
+            type=VerdictType.INCONCLUSIVE,
+            reason=f"Live check passed; finding was not reproducible. ({live_verdict.reason})",
+        )
+
+    return Verdict(
+        type=VerdictType.INCONCLUSIVE,
+        reason=f"Inconclusive verdict pipeline outcome. (Live: {live_verdict.reason}, Replay: {replay_reason})",
+    )
+
+
