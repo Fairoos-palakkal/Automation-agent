@@ -23,6 +23,9 @@ from qa_cc.tools.http import HttpTool
 from qa_cc.trace.run_state import RunState
 from qa_cc.trace.writer import TraceWriter
 from qa_cc.verdict.evidence import Evidence, EvidenceType, Finding
+from qa_cc.verdict.engine import VerdictEngine
+from qa_cc.verdict.replayer import Replayer
+from qa_cc.verdict.verifier import FindingVerifier
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -351,6 +354,20 @@ def handle_run(args: argparse.Namespace) -> int:
                 trace_writer=trace_writer,
             )
             result = agent.run(objective=args.objective, target=args.target)
+
+    # Deterministic verdict pipeline: FindingVerifier + Replayer
+    replayer = None
+    if browser_instance:
+        replayer = Replayer(browser=browser_instance, trace_writer=trace_writer)
+    elif args.mock:
+        replayer = Replayer(trace_writer=trace_writer)
+
+    verifier = FindingVerifier(
+        verdict_engine=VerdictEngine(),
+        replayer=replayer,
+        trace_writer=trace_writer,
+    )
+    result.findings = verifier.verify_findings(result.findings)
 
     if browser_instance:
         browser_instance.close()

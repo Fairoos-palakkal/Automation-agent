@@ -1,5 +1,6 @@
 """Static HTML report generator for agent run findings and evidence."""
 import html
+import json
 from pathlib import Path
 from typing import Optional, Union
 
@@ -24,14 +25,34 @@ def generate_report(
             esc_id = html.escape(active_scrubber.scrub(str(f.id)))
             esc_summary = html.escape(active_scrubber.scrub(str(f.summary)))
             verdict_badge = ""
+            verdict_reason_html = ""
             if f.verdict:
                 vtype = f.verdict.type
                 vtype_val = vtype.value if hasattr(vtype, "value") else str(vtype)
                 esc_vtype = html.escape(active_scrubber.scrub(str(vtype_val)))
                 color = "#28a745" if vtype_val == "PASS" else "#dc3545" if vtype_val == "FAIL" else "#ffc107"
                 verdict_badge = f"<span class='badge' style='background:{color};'>{esc_vtype}</span>"
+                if f.verdict.reason:
+                    esc_reason = html.escape(active_scrubber.scrub(str(f.verdict.reason)))
+                    verdict_reason_html = f"<div class='verdict-reason' style='margin:0.5rem 0 0.75rem 0;color:#94a3b8;font-size:0.9rem;'><strong>Verdict Reason:</strong> {esc_reason}</div>"
             else:
                 verdict_badge = "<span class='badge' style='background:#6c757d;'>UNVERIFIED</span>"
+
+            steps_html = ""
+            if f.steps:
+                step_items = ""
+                for s in f.steps:
+                    tool_name = html.escape(active_scrubber.scrub(str(s.get("tool", ""))))
+                    args_str = html.escape(active_scrubber.scrub(json.dumps(s.get("args", {}))))
+                    step_items += f"<li><code>{tool_name}</code> <span style='color:#cbd5e1;'>{args_str}</span></li>"
+                steps_html = f"""
+                <div class="step-list" style="margin-top:1rem;">
+                    <h4>Replayable Action Steps:</h4>
+                    <ol>
+                        {step_items}
+                    </ol>
+                </div>
+                """
 
             evidence_items = ""
             for ev in f.evidence:
@@ -50,12 +71,14 @@ def generate_report(
                     <h3>{esc_id}: {esc_summary}</h3>
                     {verdict_badge}
                 </div>
+                {verdict_reason_html}
                 <div class="evidence-list">
                     <h4>Attached Evidence:</h4>
                     <ul>
                         {evidence_items}
                     </ul>
                 </div>
+                {steps_html}
             </div>
             """
 
@@ -63,6 +86,12 @@ def generate_report(
     mock_badge_html = ""
     if is_mock:
         mock_badge_html = "<div style='margin-top:0.5rem;'><span class='badge' style='background:#eab308;color:#000;font-size:0.9rem;padding:0.3rem 0.6rem;font-weight:bold;'>MOCK RUN (SIMULATED)</span></div>"
+
+    trace_path = getattr(run_result, "trace_path", None)
+    trace_html = ""
+    if trace_path:
+        esc_trace = html.escape(active_scrubber.scrub(str(trace_path)))
+        trace_html = f"<div class='trace-link' style='margin-top:0.5rem;font-size:0.85rem;color:#94a3b8;'><strong>Trace Log:</strong> <code>{esc_trace}</code></div>"
 
     html_content = f"""<!DOCTYPE html>
 <html lang="en">
@@ -93,6 +122,7 @@ def generate_report(
             <h1>Agentic QA Command Center</h1>
             <p>Autonomous Exploration & Evidence Capture Report</p>
             {mock_badge_html}
+            {trace_html}
         </header>
 
         <div class="stats-grid">
