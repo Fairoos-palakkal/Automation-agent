@@ -9,6 +9,8 @@ from qa_cc.agents.loop_detector import (
     compute_action_fingerprint,
     compute_observation_fingerprint,
 )
+from qa_cc.agents.loop import AgentLoop
+from qa_cc.agents.step_log import StepLog
 from qa_cc.gateway.gateway import ToolGateway
 from qa_cc.llm.client import LLMClient
 from qa_cc.trace.run_state import RunState, BudgetExceeded
@@ -27,6 +29,7 @@ class RunResult:
     trace_path: Optional[str] = None
     summary: str = ""
     is_mock: bool = False
+    status: str = "completed"
 
 
 DEFAULT_TOOLS = [
@@ -124,13 +127,15 @@ class BaselineAgent:
         trace_writer: Optional[TraceWriter] = None,
         verdict_engine: Optional[VerdictEngine] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
+        step_log: Optional[StepLog] = None,
     ):
         self.client = llm_client
         self.gateway = gateway
-        self.run_state = run_state or RunState()
-        self.loop_detector = loop_detector or LoopDetector(threshold=3)
+        self.run_state = run_state if run_state is not None else RunState()
+        self.step_log = step_log if step_log is not None else StepLog()
+        self.loop_detector = loop_detector if loop_detector is not None else LoopDetector(threshold=3)
         self.trace_writer = trace_writer
-        self.verdict_engine = verdict_engine or VerdictEngine()
+        self.verdict_engine = verdict_engine if verdict_engine is not None else VerdictEngine()
         self.tools = tools if tools is not None else DEFAULT_TOOLS
         self._loop_recovery_triggered = False
 
@@ -146,147 +151,20 @@ class BaselineAgent:
             "- If a feature mentioned in the objective (e.g. login) does not exist in the site navigation, proceed to test the features that do exist.\n"
             "- Whenever you observe a bug (stale totals, broken calculations, missing validation, 404 on linked pages), immediately call report_finding with evidence before concluding."
         )
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"Objective: {objective}\nTarget URL: {target}"},
-        ]
 
-        current_url = target
-        last_obs = ""
-        budget_exceeded = False
-
-        if self.trace_writer:
-            self.trace_writer.record({
-                "type": "run_start",
-                "objective": objective,
-                "target": target,
-                "model_id": getattr(self.client.provider, "model", "unknown"),
-                "tokens": 0,
-            })
-
-        for _ in range(max_turns):
-            try:
-                self.run_state.check_budget()
-            except BudgetExceeded:
-                budget_exceeded = True
-                break
-
-            try:
-                response = self.client.chat(messages, tools=self.tools)
-            except Exception:
-                break
-
-            usage = response.get("usage", {})
-            self.run_state.record_tokens(usage.get("total_tokens", 0))
-            if self.trace_writer:
-                self.trace_writer.record({
-                    "type": "model_call",
-                    "model_id": response.get("model", "unknown"),
-                    "tokens": usage.get("total_tokens", 0),
-                    "usage": usage,
-                })
-
-            choice = response.get("choices", [{}])[0]
-            msg = choice.get("message", {})
-            messages.append(msg)
-
-            tool_calls = msg.get("tool_calls")
-            if not tool_calls:
-                break
-
-            finished = False
-            for tc in tool_calls:
-                func = tc.get("function", {})
-                tool_name = func.get("name")
-                raw_args = func.get("arguments", {})
-                if isinstance(raw_args, str):
-                    try:
-                        args = json.loads(raw_args)
-                    except Exception:
-                        args = {}
-                else:
-                    args = raw_args
-
-                if tool_name == "finish":
-                    finished = True
-                    break
-
-                if tool_name == "report_finding":
-                    ev_type_str = args.get("evidence_type", "dom_snapshot")
-                    try:
-                        ev_type = EvidenceType(ev_type_str)
-                    except ValueError:
-                        ev_type = EvidenceType.DOM_SNAPSHOT
-
-                    ev = Evidence(
-                        type=ev_type,
-                        content=args.get("evidence_content", ""),
-                        metadata={"url": current_url},
-                    )
-                    steps_list = [
-                        {"fingerprint": fp} if isinstance(fp, str) else fp
-                        for fp in self.run_state.history
-                    ]
-                    finding = Finding(
-                        id=f"F-{len(self.run_state.findings) + 1}",
-                        summary=args.get("summary", "Defect discovered"),
-                        evidence=[ev],
-                        steps=steps_list,
-                    )
-                    self.run_state.add_finding(finding)
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc.get("id", "tc-1"),
-                        "name": tool_name,
-                        "content": f"Finding recorded: {finding.id}",
-                    })
-                    continue
-
-                # Browser/HTTP tools
-                action_fp = compute_action_fingerprint(tool_name, args, current_url)
-                obs_fp = compute_observation_fingerprint(last_obs)
-
-                loop_action = self.loop_detector.check(action_fp, obs_fp)
-                if loop_action in (RecoveryAction.RE_OBSERVE, RecoveryAction.TRY_ALTERNATE):
-                    self._loop_recovery_triggered = True
-                elif loop_action == RecoveryAction.TERMINATE_INCONCLUSIVE:
-                    self._loop_recovery_triggered = True
-                    finished = True
-                    break
-
-                try:
-                    self.run_state.check_budget()
-                    self.run_state.record_action(action_fp)
-                except BudgetExceeded:
-                    budget_exceeded = True
-                    finished = True
-                    break
-
-                try:
-                    res = self.gateway.execute(tool_name, args)
-                    if isinstance(res, dict) and "url" in res:
-                        current_url = res["url"]
-                    if isinstance(res, dict) and "snapshot" in res:
-                        last_obs = res["snapshot"]
-                    res_str = json.dumps(res, default=str) if isinstance(res, (dict, list)) else str(res)
-                except Exception as e:
-                    res_str = f"Error executing {tool_name}: {e}"
-
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tc.get("id", "tc-1"),
-                    "name": tool_name,
-                    "content": res_str,
-                })
-
-            if finished:
-                break
-
-        return RunResult(
-            findings=self.run_state.findings,
-            actions_count=self.run_state.actions_count,
-            tokens_used=self.run_state.tokens_count,
-            budget_exceeded=budget_exceeded,
-            loop_recovery_triggered=self._loop_recovery_triggered,
-            trace_path=str(self.trace_writer._path) if self.trace_writer else None,
+        loop = AgentLoop(
+            client=self.client,
+            gateway=self.gateway,
+            tools=self.tools,
+            system_prompt=system_prompt,
+            run_state=self.run_state,
+            step_log=self.step_log,
+            trace_writer=self.trace_writer,
+            loop_detector=self.loop_detector,
+            verdict_engine=self.verdict_engine,
+            agent_name="baseline",
         )
+        loop_result = loop.run(objective=objective, target=target, max_turns=max_turns)
+        self._loop_recovery_triggered = loop_result.loop_recovery_triggered
+        return loop_result.to_run_result()
+
