@@ -335,7 +335,7 @@ def handle_run(args: argparse.Namespace) -> int:
             return 1
 
         # Wire HTTP tool
-        http_tool = HttpTool(allowlist=allowlist)
+        http_tool = HttpTool(allowlist=allowlist, delimit=True)
         gateway.register_tool(
             ToolDefinition(
                 name="http_request",

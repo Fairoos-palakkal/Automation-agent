@@ -24,6 +24,7 @@ from qa_cc.llm.client import LLMClient
 from qa_cc.trace.run_state import RunState, BudgetExceeded
 from qa_cc.trace.writer import TraceWriter
 from qa_cc.verdict.evidence import Evidence, EvidenceType, Finding
+from qa_cc.security.fence import SECURITY_INSTRUCTION
 
 
 @dataclass
@@ -179,7 +180,8 @@ class BrowserAgent:
             "Observe whether invalid inputs trigger unhandled exceptions, raw database errors, stack traces, or 500 status codes.\n"
             "4. Reporting Findings: Whenever you observe a defect (unhandled error, console crash, broken state, "
             "or data leak), IMMEDIATELY call report_finding with evidence (dom_snapshot or screenshot) and a descriptive summary.\n"
-            "5. Stay strictly within the scope of your assigned task, and call finish when done."
+            "5. Stay strictly within the scope of your assigned task, and call finish when done.\n\n"
+            f"{SECURITY_INSTRUCTION}"
         )
 
         user_content = f"Task ID: {task.id}\nGoal: {task.goal}\nTarget URL: {target_url}"

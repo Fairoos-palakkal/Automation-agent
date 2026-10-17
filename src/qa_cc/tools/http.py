@@ -12,6 +12,9 @@ from qa_cc.gateway.gateway import TargetNotAllowed
 from qa_cc.verdict.evidence import Evidence, EvidenceType
 
 
+from qa_cc.security.fence import ContentFence
+
+
 class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
     """Prevents automatic redirect following so each hop can be inspected."""
     def redirect_request(self, req, fp, code, msg, headers, newurl):
@@ -27,11 +30,15 @@ class HttpTool:
         allowlist: Optional[List[str]] = None,
         max_redirects: int = 5,
         max_body_bytes: int = 256 * 1024,
+        fence: Optional[ContentFence] = None,
+        delimit: bool = False,
     ):
         self.requester = requester
         self.allowlist = allowlist or ["localhost", "127.0.0.1"]
         self.max_redirects = max_redirects
         self.max_body_bytes = max_body_bytes
+        self.fence = fence or ContentFence()
+        self.delimit = delimit
 
     def request(
         self,
@@ -58,9 +65,14 @@ class HttpTool:
                     headers=current_headers,
                     body=current_body,
                 )
-                status_code = getattr(resp, "status_code", 200)
-                text = getattr(resp, "text", "")
-                resp_headers = dict(getattr(resp, "headers", {}))
+                if isinstance(resp, dict):
+                    status_code = resp.get("status_code", 200)
+                    text = resp.get("text", resp.get("body", ""))
+                    resp_headers = dict(resp.get("headers", {}))
+                else:
+                    status_code = getattr(resp, "status_code", 200)
+                    text = getattr(resp, "text", getattr(resp, "body", ""))
+                    resp_headers = dict(getattr(resp, "headers", {}))
             else:
                 data = None
                 if current_body is not None:
@@ -150,9 +162,12 @@ class HttpTool:
             },
         )
 
+        fenced_body = self.fence.wrap(text) if (self.delimit and self.fence) else text
+
         return {
             "status_code": status_code,
             "headers": resp_headers,
-            "body": text,
+            "body": fenced_body,
+            "raw_body": text,
             "evidence": evidence,
         }

@@ -24,6 +24,7 @@ from qa_cc.llm.client import LLMClient
 from qa_cc.trace.run_state import RunState, BudgetExceeded
 from qa_cc.trace.writer import TraceWriter
 from qa_cc.verdict.evidence import Evidence, EvidenceType, Finding
+from qa_cc.security.fence import SECURITY_INSTRUCTION
 
 
 API_TOOLS: List[Dict[str, Any]] = [
@@ -134,7 +135,8 @@ class APIAgent:
             "3. Immediate Reporting: Whenever you detect an unexpected 200 (auth bypass), 500 Internal Server Error, "
             "SQL error leak, or missing authorization, IMMEDIATELY call report_finding with evidence_type='network_request' "
             "and evidence_content containing the request method, URL, status code, and response body before finishing.\n"
-            "4. Stay strictly within the scope of your assigned task, and call finish when done."
+            "4. Stay strictly within the scope of your assigned task, and call finish when done.\n\n"
+            f"{SECURITY_INSTRUCTION}"
         )
 
         user_content = f"Task ID: {task.id}\nGoal: {task.goal}\nBase URL: {base_url}"

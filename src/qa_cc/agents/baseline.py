@@ -17,6 +17,7 @@ from qa_cc.trace.run_state import RunState, BudgetExceeded
 from qa_cc.trace.writer import TraceWriter
 from qa_cc.verdict.engine import VerdictEngine
 from qa_cc.verdict.evidence import Evidence, EvidenceType, Finding
+from qa_cc.security.fence import SECURITY_INSTRUCTION
 
 
 @dataclass
@@ -160,7 +161,8 @@ class BaselineAgent:
             "- Do not navigate directly to static code assets (.js, .css). Explore through HTML pages and UI controls.\n"
             "- If an overlay, modal dialog, or banner covers interactive elements, dismiss it so page controls become accessible.\n"
             "- If a feature mentioned in the objective is absent, thoroughly test all available navigation paths and controls.\n"
-            "- Whenever you observe unexpected behavior (unhandled exceptions, HTTP errors, broken form submission, or state inconsistencies), immediately call report_finding with evidence before concluding."
+            "- Whenever you observe unexpected behavior (unhandled exceptions, HTTP errors, broken form submission, or state inconsistencies), immediately call report_finding with evidence before concluding.\n\n"
+            f"{SECURITY_INSTRUCTION}"
         )
 
         extra_content = None

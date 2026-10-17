@@ -31,22 +31,21 @@ def compact_snapshot(html: str, max_chars: int = 25000) -> str:
     return cleaned
 
 
-def delimit_dom_content(content: str) -> str:
-    """Wraps untrusted DOM content in explicit semantic boundary markers."""
-    return f"<UNTRUSTED_DOM_CONTENT>\n{content}\n</UNTRUSTED_DOM_CONTENT>"
+from qa_cc.security.fence import ContentFence, delimit_dom_content
 
 
 class BrowserTools:
     """Encapsulates browser automation commands operating on a driver."""
 
-    def __init__(self, driver: Any, delimit: bool = True):
+    def __init__(self, driver: Any, delimit: bool = True, fence: Optional[ContentFence] = None):
         self.driver = driver
         self.delimit = delimit
+        self.fence = fence or ContentFence()
 
     def _format_snapshot(self, content: str) -> str:
         compacted = compact_snapshot(content)
         if self.delimit:
-            return delimit_dom_content(compacted)
+            return self.fence.wrap(compacted)
         return compacted
 
     def navigate(self, url: str) -> Dict[str, Any]:
