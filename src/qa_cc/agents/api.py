@@ -138,8 +138,13 @@ class APIAgent:
             "4. Stay strictly within the scope of your assigned task, and call finish when done.\n\n"
             f"{SECURITY_INSTRUCTION}"
         )
+        prior_findings = task.metadata.get("prior_findings", [])
+        findings_section = ""
+        if prior_findings:
+            rendered = "\n".join(f"- {f.get('id', 'F')}: {f.get('summary', '')}" for f in prior_findings)
+            findings_section = f"\n\nPreviously Discovered Findings (do not duplicate):\n{rendered}"
 
-        user_content = f"Task ID: {task.id}\nGoal: {task.goal}\nBase URL: {base_url}"
+        user_content = f"Task ID: {task.id}\nGoal: {task.goal}\nBase URL: {base_url}{findings_section}"
         loop = AgentLoop(
             client=self.client,
             gateway=self.gateway,

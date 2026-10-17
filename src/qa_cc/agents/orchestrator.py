@@ -9,6 +9,7 @@ Key architectural invariants:
 """
 from __future__ import annotations
 
+import json
 from typing import Any, Dict, List, Optional
 
 from qa_cc.agents.baseline import RunResult
@@ -82,12 +83,24 @@ class Orchestrator:
         total_actions = 0
         total_tokens = 0
         replans_used = 0
-        tasks = list(plan.tasks)
+        completed_task_ids: set[str] = set()
+        tasks: List[Task] = list(plan.tasks)
         i = 0
 
         while i < len(tasks):
+            # Enforce global run-level budget before starting each task
+            if (
+                self.run_state.action_count >= self.run_state.max_actions
+                or self.run_state.token_count > self.run_state.max_tokens
+            ):
+                break
+
             task = tasks[i]
             i += 1
+
+            # Skip completed tasks (never re-run completed task IDs)
+            if task.id in completed_task_ids:
+                continue
 
             # Pass only compact prior finding summaries, never transcripts (D6)
             task.metadata["prior_findings"] = [
@@ -96,14 +109,25 @@ class Orchestrator:
 
             assignee_val = task.assignee.value if hasattr(task.assignee, "value") else str(task.assignee)
             if assignee_val == AgentType.BROWSER.value:
+                if hasattr(self.browser_agent, "new_context"):
+                    self.browser_agent.new_context()
                 task_result = self.browser_agent.execute(task, target_url=target, step_log=self.step_log)
             elif assignee_val == AgentType.API.value:
                 task_result = self.api_agent.execute(task, base_url=target, step_log=self.step_log)
             else:
+                if hasattr(self.browser_agent, "new_context"):
+                    self.browser_agent.new_context()
                 task_result = self.browser_agent.execute(task, target_url=target, step_log=self.step_log)
 
-            total_actions += getattr(task_result, "actions_count", 0)
-            total_tokens += getattr(task_result, "tokens_used", 0)
+            actions_used = getattr(task_result, "actions_count", 0)
+            tokens_used = getattr(task_result, "tokens_used", 0)
+            total_actions += actions_used
+            total_tokens += tokens_used
+
+            # Charge every TaskResult to the run-level RunState
+            for _ in range(actions_used):
+                self.run_state.record_action(f"task-{task.id}")
+            self.run_state.record_tokens(tokens_used)
 
             # Record subagent completion in trace
             if self.trace_writer:
@@ -120,34 +144,80 @@ class Orchestrator:
                 all_findings.append(finding)
                 self.run_state.add_finding(finding)
 
-            # Check if task failed and replanning is allowed
-            if task_result.status == "failed" and replans_used < max_replans:
-                report = task_result.summary or f"Task {task.id} failed"
-                try:
-                    revised_plan = self.planner.replan(
-                        original_plan=plan,
-                        agent_report=report,
-                        total_budget=total_budget,
-                    )
-                    replans_used += 1
-                    # Replace remaining tasks with new plan's tasks
-                    tasks = list(revised_plan.tasks)
-                    i = 0
+            if task_result.status == "completed":
+                completed_task_ids.add(task.id)
+
+            # Check if task failed or hit terminal condition and replanning is needed
+            if task_result.status in ("failed", "loop_terminated", "llm_error"):
+                report = json.dumps({
+                    "task_id": task.id,
+                    "status": task_result.status,
+                    "summary": task_result.summary or f"Task {task.id} failed",
+                    "findings_count": len(task_result.findings),
+                    "completed_tasks": list(completed_task_ids),
+                })
+
+                if replans_used < max_replans:
+                    remaining_budget = {
+                        "max_actions": max(0, self.run_state.max_actions - self.run_state.action_count),
+                        "max_tokens": max(0, self.run_state.max_tokens - self.run_state.token_count),
+                    }
+                    try:
+                        revised_plan = self.planner.replan(
+                            original_plan=plan,
+                            agent_report=report,
+                            total_budget=remaining_budget,
+                        )
+                        replans_used += 1
+                        # Filter out completed tasks so they never re-run
+                        new_tasks = [t for t in revised_plan.tasks if t.id not in completed_task_ids]
+                        tasks = new_tasks
+                        i = 0
+                        if self.trace_writer:
+                            self.trace_writer.record({
+                                "type": "plan_revised",
+                                "plan": revised_plan.model_dump() if hasattr(revised_plan, "model_dump") else str(revised_plan),
+                                "replan_count": replans_used,
+                            })
+                    except Exception as exc:
+                        if self.trace_writer:
+                            self.trace_writer.record({
+                                "type": "replan_refused",
+                                "reason": str(exc),
+                                "task_id": task.id,
+                                "replans_used": replans_used,
+                            })
+                else:
+                    # 3rd failure or max_replans reached: refuse replan and trace
                     if self.trace_writer:
                         self.trace_writer.record({
-                            "type": "plan_revised",
-                            "plan": revised_plan.model_dump() if hasattr(revised_plan, "model_dump") else str(revised_plan),
+                            "type": "replan_refused",
+                            "reason": f"Maximum replan limit reached ({max_replans})",
+                            "task_id": task.id,
+                            "status": task_result.status,
+                            "replans_used": replans_used,
                         })
-                except Exception:
-                    pass
+
+            # Check global run budget after charging
+            if (
+                self.run_state.action_count >= self.run_state.max_actions
+                or self.run_state.token_count > self.run_state.max_tokens
+            ):
+                break
+
+        budget_exceeded = (
+            self.run_state.action_count >= self.run_state.max_actions
+            or self.run_state.token_count > self.run_state.max_tokens
+        )
 
         return RunResult(
             findings=all_findings,
             actions_count=total_actions,
             tokens_used=total_tokens,
-            budget_exceeded=self.run_state.action_count >= self.run_state.max_actions,
+            budget_exceeded=budget_exceeded,
             loop_recovery_triggered=False,
             trace_path=str(self.trace_writer._path) if self.trace_writer else None,
             summary=f"Orchestrated multi-agent run completed: {len(all_findings)} findings",
             step_log=self.step_log,
         )
+

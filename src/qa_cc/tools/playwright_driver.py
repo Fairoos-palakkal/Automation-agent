@@ -104,6 +104,24 @@ class PlaywrightPageDriver:
     def content(self) -> str:
         return self._page.content()
 
+    def new_context(self) -> None:
+        """Create a fresh browser context and page if running under Playwright browser."""
+        if hasattr(self, "_page") and hasattr(self._page, "context"):
+            ctx = self._page.context
+            browser = getattr(ctx, "browser", None)
+            if browser and hasattr(browser, "new_context"):
+                try:
+                    ctx.close()
+                except Exception:
+                    pass
+                new_ctx = browser.new_context()
+                self._page = new_ctx.new_page()
+                self.console_messages.clear()
+                self.failed_requests.clear()
+                self.denied_requests.clear()
+                self._setup_route_interception()
+
     @property
     def url(self) -> str:
         return self._page.url
+

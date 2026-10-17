@@ -166,6 +166,12 @@ class BrowserAgent:
         self.loop_detector = loop_detector or LoopDetector(threshold=3)
         self.step_log = step_log
 
+    def new_context(self) -> None:
+        """Reset browser context for isolation across tasks."""
+        driver = getattr(self.gateway, "driver", None)
+        if driver and hasattr(driver, "new_context"):
+            driver.new_context()
+
     def execute(
         self,
         task: Task,
@@ -174,6 +180,7 @@ class BrowserAgent:
         step_log: Optional[StepLog] = None,
     ) -> TaskResult:
         """Execute a browser task under its own dedicated budget and context."""
+        self.new_context()
         max_actions = task.budget.get("max_actions", 25)
         max_tokens = task.budget.get("max_tokens", 100_000)
         run_state = RunState(max_actions=max_actions, max_tokens=max_tokens)
@@ -195,7 +202,13 @@ class BrowserAgent:
             f"{SECURITY_INSTRUCTION}"
         )
 
-        user_content = f"Task ID: {task.id}\nGoal: {task.goal}\nTarget URL: {target_url}"
+        prior_findings = task.metadata.get("prior_findings", [])
+        findings_section = ""
+        if prior_findings:
+            rendered = "\n".join(f"- {f.get('id', 'F')}: {f.get('summary', '')}" for f in prior_findings)
+            findings_section = f"\n\nPreviously Discovered Findings (do not duplicate):\n{rendered}"
+
+        user_content = f"Task ID: {task.id}\nGoal: {task.goal}\nTarget URL: {target_url}{findings_section}"
         loop = AgentLoop(
             client=self.client,
             gateway=self.gateway,
@@ -214,4 +227,5 @@ class BrowserAgent:
             extra_user_content=user_content,
         )
         return loop_result.to_task_result(task_id=task.id)
+
 
