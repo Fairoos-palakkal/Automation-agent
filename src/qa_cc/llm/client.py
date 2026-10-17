@@ -72,13 +72,24 @@ class LLMClient:
             MalformedOutputError: when all attempts are exhausted.
         """
         last_exc: Exception | None = None
+        current_messages = list(messages)
         for attempt in range(self._max_retries + 1):
-            response = self.provider.chat(messages, **kwargs)
+            response = self.provider.chat(current_messages, **kwargs)
             self._record_usage(response)
             try:
                 return parse_fn(response)
             except Exception as exc:
                 last_exc = exc
+                if attempt < self._max_retries:
+                    choice = response.get("choices", [{}])[0]
+                    assistant_msg = choice.get("message", {})
+                    current_messages = list(current_messages)
+                    if assistant_msg:
+                        current_messages.append(assistant_msg)
+                    current_messages.append({
+                        "role": "user",
+                        "content": f"Your response could not be parsed: {exc}. Please correct the formatting and respond ONLY with valid JSON matching the required schema.",
+                    })
 
         raise MalformedOutputError(
             f"LLM returned unparseable output after {self._max_retries + 1} attempts. "

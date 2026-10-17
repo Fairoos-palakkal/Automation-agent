@@ -23,6 +23,7 @@ from qa_cc.agents.loop_detector import (
 from qa_cc.agents.step_log import StepLog
 from qa_cc.gateway.gateway import ToolGateway
 from qa_cc.llm.client import LLMClient
+from qa_cc.tools.browser import compact_snapshot, extract_interactive_elements
 from qa_cc.trace.run_state import RunState, BudgetExceeded
 from qa_cc.trace.writer import TraceWriter
 from qa_cc.verdict.evidence import Evidence, EvidenceType, Finding
@@ -260,15 +261,6 @@ class AgentLoop:
 
                 # Normal tool execution (browser, http, etc.)
                 action_fp = compute_action_fingerprint(tool_name, args, current_url)
-                obs_fp = compute_observation_fingerprint(last_obs)
-
-                loop_action = self.loop_detector.check(action_fp, obs_fp)
-                if loop_action in (RecoveryAction.RE_OBSERVE, RecoveryAction.TRY_ALTERNATE):
-                    self._loop_recovery_triggered = True
-                elif loop_action == RecoveryAction.TERMINATE_INCONCLUSIVE:
-                    self._loop_recovery_triggered = True
-                    finished = True
-                    break
 
                 try:
                     self.run_state.check_budget()
@@ -319,6 +311,58 @@ class AgentLoop:
                             "tokens": 0,
                         })
                     res_str = f"Error executing {tool_name}: {e}"
+
+                # Post-action loop detection using observation after action execution
+                obs_fp = compute_observation_fingerprint(last_obs or res_str)
+                loop_action = self.loop_detector.check(action_fp, obs_fp)
+
+                if loop_action != RecoveryAction.CONTINUE:
+                    self._loop_recovery_triggered = True
+                    if self.trace_writer:
+                        self.trace_writer.record({
+                            "type": "loop_recovery",
+                            "recovery_action": loop_action.value,
+                            "agent": self.agent_name,
+                            "task_id": self.task_id,
+                            "repeated_tool": tool_name,
+                            "repeated_args": args,
+                            "model_id": getattr(getattr(self.client, "provider", None), "model", "unknown"),
+                            "tokens": 0,
+                        })
+
+                    if loop_action == RecoveryAction.RE_OBSERVE:
+                        driver = getattr(self.gateway, "driver", None)
+                        fresh_obs = last_obs
+                        if driver and hasattr(driver, "content"):
+                            try:
+                                raw_dom = driver.content()
+                                interactive = extract_interactive_elements(raw_dom, max_chars=2000)
+                                compact = compact_snapshot(raw_dom, max_chars=2000)
+                                fresh_obs = f"Interactive Elements:\n{interactive}\nPage Content:\n{compact}"
+                            except Exception:
+                                pass
+                        res_str += (
+                            f"\n[LOOP DETECTED - RE-OBSERVE] You have repeated action '{tool_name}' with arguments {args}. "
+                            f"Fresh observation snapshot:\n{fresh_obs}\n"
+                            "Please inspect the current page state carefully and choose an appropriate next step."
+                        )
+                    elif loop_action == RecoveryAction.TRY_ALTERNATE:
+                        res_str += (
+                            f"\n[LOOP DETECTED - TRY ALTERNATE] Action '{tool_name}' with arguments {args} continues to loop. "
+                            "You MUST choose an alternate tool or selector. Do not repeat the previous action."
+                        )
+                    elif loop_action == RecoveryAction.TERMINATE_INCONCLUSIVE:
+                        status = "loop_terminated"
+                        summary = f"Loop terminated inconclusive: repeated action '{tool_name}' detected."
+                        res_str += f"\n[LOOP DETECTED - TERMINATED] Execution terminated due to repeated action cycles."
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tc.get("id", "tc-1"),
+                            "name": tool_name,
+                            "content": res_str,
+                        })
+                        finished = True
+                        break
 
                 messages.append({
                     "role": "tool",
