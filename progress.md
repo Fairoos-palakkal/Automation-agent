@@ -1,9 +1,9 @@
 # Agentic QA Command Center — Progress Report
 
 > **Last Updated:** 2026-10-17  
-> **Completed Phases:** Phase 0, Phase 1, Phase 2, Phase 3, Phase 4, Phase 5 (Stop the Bleeding: Integrity & Safety P0) ✅  
-> **Active Next Phase:** Phase 6 (One Loop, Real Evidence: Tickets T-08 through T-11)  
-> **Test Status:** 156 unit/contract tests passing (2 live deselected, 2 e2e verified passing)
+> **Completed Phases:** Phase 0, Phase 1, Phase 2, Phase 3, Phase 4, Phase 5, Phase 6 (One Loop, Real Evidence: Tickets T-08 through T-11) ✅  
+> **Active Next Phase:** Phase 7 (Verdicts from Code: Engine, Replay & FindingVerifier: Tickets T-12 through T-15)  
+> **Test Status:** 168 unit/contract tests passing (2 live deselected, 5 e2e verified passing)
 
 ---
 
@@ -373,14 +373,29 @@ Phase 5 stopped all active integrity breaches and safety vulnerabilities across 
 
 ---
 
+## Phase 6 — One Loop, Real Evidence (Complete ✅)
+
+Phase 6 unified all exploration agents (`BaselineAgent`, `BrowserAgent`, `APIAgent`) onto a single, robust `AgentLoop` and `StepLog`, introduced cryptographic hash-chained `TraceEntry` schemas with strict run identity and attributable directory layouts (`runs/<config>/<run_id>/`), and enforced structured findings with automatic observation capture that ignores hallucinated evidence text.
+
+### 6.1 — Tickets Completed
+
+| Ticket | Scope | Implementation | Tests | Status |
+|---|---|---|---|---|
+| **T-08** | Shared `AgentLoop` + `StepLog` Architecture (Expand) | Built `StepLog` (`qa_cc/agents/step_log.py`) and `AgentLoop` (`qa_cc/agents/loop.py`). Migrated `BaselineAgent` to use `AgentLoop`. Replaced silent error swallowing with structured error statuses (`llm_error`, `tool_error`, `invalid_args`) recorded in trace and RunState. Rejects malformed tool argument JSON with explicit diagnostic message. | [`tests/unit/test_agent_loop.py`](file:///Users/fairoospalakkal/Desktop/Automation-agent/tests/unit/test_agent_loop.py), [`tests/unit/test_baseline_agent.py`](file:///Users/fairoospalakkal/Desktop/Automation-agent/tests/unit/test_baseline_agent.py) | ✅ Resolved |
+| **T-09** | Migrate `BrowserAgent` & `APIAgent` to Shared Loop (Contract) | Migrated `BrowserAgent` and `APIAgent` to use `AgentLoop`. Deleted duplicated exploration loops (~500 fewer lines), unifying tool argument parsing, step logging, and error handling across all agents while preserving specialized system prompts and tool schemas. | [`tests/unit/test_browser_agent.py`](file:///Users/fairoospalakkal/Desktop/Automation-agent/tests/unit/test_browser_agent.py), [`tests/unit/test_api_agent.py`](file:///Users/fairoospalakkal/Desktop/Automation-agent/tests/unit/test_api_agent.py), [`tests/unit/test_orchestrator.py`](file:///Users/fairoospalakkal/Desktop/Automation-agent/tests/unit/test_orchestrator.py), [`tests/e2e/test_multi_agent_e2e.py`](file:///Users/fairoospalakkal/Desktop/Automation-agent/tests/e2e/test_multi_agent_e2e.py) | ✅ Resolved |
+| **T-10** | Run Identity, Directory Layout & Validated `TraceEntry` Schema | Implemented attributable `runs/<config>/<run_id>/` layout and `--run-id` in CLI. Defined validated Pydantic `TraceEntry` schema (`qa_cc/trace/schema.py`) with cryptographic hash chaining (`seq`, `prev_hash`, `entry_hash`), model ID, and token accounting. Wired `ToolGateway` to record denied tool calls in a `finally` block. | [`tests/unit/test_trace_schema_and_identity.py`](file:///Users/fairoospalakkal/Desktop/Automation-agent/tests/unit/test_trace_schema_and_identity.py), [`tests/unit/test_trace_writer.py`](file:///Users/fairoospalakkal/Desktop/Automation-agent/tests/unit/test_trace_writer.py), [`tests/unit/test_cli.py`](file:///Users/fairoospalakkal/Desktop/Automation-agent/tests/unit/test_cli.py) | ✅ Resolved |
+| **T-11** | Structured Findings & Observation Evidence Capture | Updated `report_finding` tool schema across agents to accept `{summary, expected, actual, selector_or_url, step_ids}`. `Finding` model captures concrete steps referencing `StepLog` IDs (`step-1`, `step-2`). Runtime captures real gateway observation (DOM snapshot, console error, or HTTP exchange) and ignores model-fabricated `evidence_content` strings. | [`tests/unit/test_structured_findings.py`](file:///Users/fairoospalakkal/Desktop/Automation-agent/tests/unit/test_structured_findings.py), [`tests/unit/test_baseline_agent.py`](file:///Users/fairoospalakkal/Desktop/Automation-agent/tests/unit/test_baseline_agent.py) | ✅ Resolved |
+
+---
+
 ## Test Coverage Summary
 
 | Category | Tests | Status |
 |---|---|---|
-| Unit + Contract tests | 156 | ✅ All passing |
+| Unit + Contract tests | 168 | ✅ All passing |
 | Live Contract tests | 2 | ⏸️ Deselected by default (requires API key) |
-| E2E (Playwright) | 2 | ✅ Verified passing |
-| **Total Collected** | **160** | ✅ 158 active passing |
+| E2E (Playwright) | 5 | ✅ Verified passing |
+| **Total Collected** | **175** | ✅ 173 active passing |
 
 ---
 
@@ -399,14 +414,14 @@ pytest tests/e2e/ -v -m e2e
 # Contract tests (consumes real tokens)
 pytest tests/contract/ -v -m live
 
-# Run baseline agent in mock mode
-python -m qa_cc run --target http://localhost:3000 --objective "Sanity test" --mock
+# Run baseline agent in mock mode with attributable run directory
+python -m qa_cc run --target http://localhost:3000 --objective "Sanity test" --mock --run-id run-001
 
 # Run multi-agent in mock mode
-python -m qa_cc run --target http://localhost:3000 --objective "Multi-agent test" --mock --multi-agent
+python -m qa_cc run --target http://localhost:3000 --objective "Multi-agent test" --mock --multi-agent --run-id run-002
 
 # Score run findings against ground truth
-python -m qa_cc score --run-dir ./run_output --ground-truth benchmark/ground_truth/defects.json
+python -m qa_cc score --run-dir ./runs/baseline/run-001 --ground-truth benchmark/ground_truth/defects.json
 
 # Display aggregated benchmark results table
 python -m qa_cc results --format table
@@ -422,7 +437,7 @@ python -m qa_cc results --format table
 - [x] **Phase 3:** Challenger, Juice Shop Integration, Prompt Injection Fixture, Benchmark Results, Polish
 - [x] **Phase 4:** Align: Doc Layout, Decisions (D4, ADR-0003/0004/0005), Domain Vocabulary, Spec & 30 Tracer-Bullet Tickets
 - [x] **Phase 5:** Stop the Bleeding: Integrity & Safety P0 (T-01 to T-07, T-30)
-- [ ] **Phase 6:** One Loop, Real Evidence (T-08 to T-11)
+- [x] **Phase 6:** One Loop, Real Evidence (T-08 to T-11)
 - [ ] **Phase 7:** Verdicts from Code: Engine, Replay & FindingVerifier (T-12 to T-15)
 - [ ] **Phase 8:** Agents That Really Work: Black-Box Prompts, Bounded Orchestrator & Observation (T-16 to T-22)
 - [ ] **Phase 9:** Measure Honestly: PRD §9 Scorer, SPA Crawler, Held-Out Lock, Benchmark (T-23 to T-26)
