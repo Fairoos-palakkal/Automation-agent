@@ -4,11 +4,11 @@
 
 **Blocked by:** 09: T-08: Shared AgentLoop and StepLog Architecture (Expand)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 ## Acceptance criteria
 
-- [ ] All trace entries conform to the Pydantic TraceEntry schema
-- [ ] Every model call trace entry includes the served model_id and token usage
-- [ ] Denied tool calls (e.g. allowlist violations) produce trace entries in trace.jsonl
-- [ ] Token counts aggregated from trace.jsonl match the final RunResult totals
+- [x] All trace entries conform to the Pydantic TraceEntry schema
+- [x] Every model call trace entry includes the served model_id and token usage
+- [x] Denied tool calls (e.g. allowlist violations) produce trace entries in trace.jsonl
+- [x] Token counts aggregated from trace.jsonl match the final RunResult totals

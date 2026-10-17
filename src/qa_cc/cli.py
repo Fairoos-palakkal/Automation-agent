@@ -1,10 +1,12 @@
 import argparse
+from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
 import sys
 from typing import List, Optional
 from urllib.parse import urlparse
+import uuid
 
 from qa_cc.agents.baseline import BaselineAgent, RunResult
 from qa_cc.agents.plan import Plan, Task, AgentType
@@ -34,7 +36,8 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser = subparsers.add_parser("run", help="Execute an autonomous QA run against a target")
     run_parser.add_argument("--target", required=True, help="Target URL (e.g. http://localhost:3000)")
     run_parser.add_argument("--objective", required=True, help="Natural language objective")
-    run_parser.add_argument("--output-dir", default="./run_output", help="Directory for trace and reports")
+    run_parser.add_argument("--output-dir", default=None, help="Directory for trace and reports (defaults to runs/<config>/<run_id>)")
+    run_parser.add_argument("--run-id", default=None, help="Attributable Run identifier (defaults to generated run-YYYYMMDD-HHMMSS-<id>)")
     run_parser.add_argument("--mock", action="store_true", help="Use deterministic mock provider for testing")
     run_parser.add_argument("--multi-agent", action="store_true", help="Run with Planner + BrowserAgent + APIAgent")
     run_parser.add_argument("--max-actions", type=int, default=25, help="Action budget limit")
@@ -60,14 +63,21 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def handle_run(args: argparse.Namespace) -> int:
-    out_dir = Path(args.output_dir)
+    config = "multi_agent" if args.multi_agent else "baseline"
+    run_id = args.run_id or f"run-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}"
+    if args.output_dir:
+        out_dir = Path(args.output_dir)
+    else:
+        out_dir = Path("runs") / config / run_id
+
     out_dir.mkdir(parents=True, exist_ok=True)
     trace_path = out_dir / "trace.jsonl"
     report_path = out_dir / "report.html"
 
     scrubber = Scrubber(secret_env_vars=["LLM_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY"])
-    trace_writer = TraceWriter(trace_path, scrubber=scrubber)
+    trace_writer = TraceWriter(trace_path, scrubber=scrubber, run_id=run_id)
     run_state = RunState(max_actions=args.max_actions, max_tokens=args.max_tokens)
+
 
     target_parsed = urlparse(args.target)
     allowlist = ["localhost", "127.0.0.1"]

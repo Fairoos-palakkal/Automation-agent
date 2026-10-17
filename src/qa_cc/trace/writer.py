@@ -15,16 +15,18 @@ from typing import Any
 
 
 from qa_cc.security.scrubber import Scrubber
+from qa_cc.trace.schema import TraceEntry
 
 
 class TraceWriter:
-    """Writes trace entries to a JSONL file.
+    """Writes trace entries to a JSONL file with cryptographic hash chaining and secret scrubbing.
 
     Args:
         path: Destination file path. Parent directories are created if absent.
         secret_env_vars: Names of environment variables whose values should be
                          scrubbed from all trace output.
         scrubber: Optional pre-configured Scrubber instance.
+        run_id: Optional unique identifier for this Run.
     """
 
     SCRUB_PLACEHOLDER = "[SCRUBBED]"
@@ -34,10 +36,12 @@ class TraceWriter:
         path: Path | str,
         secret_env_vars: list[str] | None = None,
         scrubber: Scrubber | None = None,
+        run_id: str | None = None,
     ) -> None:
         self._path = Path(path)
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self.scrubber = scrubber or Scrubber(secret_env_vars=secret_env_vars)
+        self.run_id = run_id
         self._secret_values: set[str] = set()
         for var in secret_env_vars or []:
             value = os.environ.get(var)
@@ -45,17 +49,56 @@ class TraceWriter:
                 self._secret_values.add(value)
                 self.scrubber.add_secret(value)
 
-    def record(self, entry: dict[str, Any]) -> None:
+        self._seq = 0
+        self._prev_hash = "0" * 64
+        if self._path.exists() and self._path.stat().st_size > 0:
+            existing = self.read_entries()
+            if existing:
+                last = existing[-1]
+                self._seq = last.get("seq", len(existing) - 1) + 1
+                self._prev_hash = last.get("entry_hash", "0" * 64)
+
+    def record(self, entry: dict[str, Any] | TraceEntry) -> TraceEntry:
         """Append one entry to the JSONL trace file.
 
-        Args:
-            entry: A dict with at minimum ``type``, ``model_id``, and ``tokens`` keys.
-                   A ``timestamp`` field is injected automatically if absent.
+        Validates against TraceEntry schema, computes SHA-256 hash-chain,
+        and scrubs secrets recursively.
         """
-        stamped = {"timestamp": self._now_iso(), **entry}
-        scrubbed = self._scrub(stamped)
+        if isinstance(entry, TraceEntry):
+            raw = entry.model_dump()
+        else:
+            raw = dict(entry)
+
+        seq = raw.get("seq", self._seq)
+        prev_hash = raw.get("prev_hash", self._prev_hash)
+        timestamp = raw.get("timestamp", self._now_iso())
+        model_id = raw.get("model_id", "agent-gateway")
+        tokens = raw.get("tokens", 0)
+        run_id = raw.get("run_id", self.run_id)
+
+        entry_dict = {
+            **raw,
+            "seq": seq,
+            "prev_hash": prev_hash,
+            "timestamp": timestamp,
+            "model_id": model_id,
+            "tokens": tokens,
+        }
+        if run_id is not None:
+            entry_dict["run_id"] = run_id
+
+        scrubbed = self._scrub(entry_dict)
+        trace_obj = TraceEntry(**scrubbed)
+        if not trace_obj.entry_hash:
+            trace_obj.entry_hash = trace_obj.compute_hash()
+
+        self._seq = trace_obj.seq + 1
+        self._prev_hash = trace_obj.entry_hash
+
         with self._path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(scrubbed, default=str) + "\n")
+            fh.write(json.dumps(trace_obj.model_dump(), default=str) + "\n")
+
+        return trace_obj
 
     def record_tool_call(
         self,

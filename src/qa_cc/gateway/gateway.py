@@ -74,34 +74,58 @@ class ToolGateway:
         return self.scrubber.scrub(obj)
 
     def execute(self, tool_name: str, args: Dict[str, Any]) -> Any:
-        if tool_name not in self._registry:
-            raise ToolNotFound(f"Tool '{tool_name}' is not registered in ToolGateway.")
+        result = None
+        error = None
+        denied = False
+        denial_reason = None
 
-        tool_def = self._registry[tool_name]
+        try:
+            if tool_name not in self._registry:
+                denied = True
+                denial_reason = f"Tool '{tool_name}' is not registered in ToolGateway."
+                raise ToolNotFound(denial_reason)
 
-        # Permission check
-        if tool_def.required_permission and tool_def.required_permission not in self.granted_permissions:
-            raise PermissionRequired(
-                f"Tool '{tool_name}' requires permission '{tool_def.required_permission}' which has not been granted."
-            )
+            tool_def = self._registry[tool_name]
 
-        # Allowlist check for url actions
-        if tool_def.is_url_action:
-            url = args.get("url", "")
-            if not self._is_url_allowed(url):
-                raise TargetNotAllowed(f"Target URL '{url}' is not permitted by allowlist: {self.allowlist}")
+            # Permission check
+            if tool_def.required_permission and tool_def.required_permission not in self.granted_permissions:
+                denied = True
+                denial_reason = (
+                    f"Tool '{tool_name}' requires permission '{tool_def.required_permission}' which has not been granted."
+                )
+                raise PermissionRequired(denial_reason)
 
-        # Execute handler
-        result = tool_def.handler(**args)
+            # Allowlist check for url actions
+            if tool_def.is_url_action:
+                url = args.get("url", "")
+                if not self._is_url_allowed(url):
+                    denied = True
+                    denial_reason = f"Target URL '{url}' is not permitted by allowlist: {self.allowlist}"
+                    raise TargetNotAllowed(denial_reason)
 
-        # Trace recording
-        if self.trace_writer:
-            scrubbed_args = self._scrub_obj(args)
-            scrubbed_result = self._scrub_obj(result)
-            self.trace_writer.record_tool_call(
-                tool_name=tool_name,
-                args=scrubbed_args,
-                result=scrubbed_result,
-            )
+            # Execute handler
+            result = tool_def.handler(**args)
+            return result
+        except Exception as e:
+            error = str(e)
+            raise
+        finally:
+            if self.trace_writer:
+                scrubbed_args = self._scrub_obj(args)
+                scrubbed_result = self._scrub_obj(result) if result is not None else None
+                entry_type = "tool_call_denied" if denied else "tool_call"
+                payload = {
+                    "type": entry_type,
+                    "tool_name": tool_name,
+                    "args": scrubbed_args,
+                    "result": scrubbed_result,
+                    "model_id": "agent-gateway",
+                    "tokens": 0,
+                    "ok": error is None,
+                }
+                if error is not None:
+                    payload["error"] = error
+                if denied and denial_reason:
+                    payload["denial_reason"] = denial_reason
+                self.trace_writer.record(payload)
 
-        return result
