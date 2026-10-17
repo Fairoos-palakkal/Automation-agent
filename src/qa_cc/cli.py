@@ -325,6 +325,13 @@ def handle_run(args: argparse.Namespace) -> int:
                 browser_tools.screenshot,
                 allowed_callers={"baseline", "browser"},
             )
+            gateway.register_tool(
+                ToolDefinition(
+                    name="console_errors",
+                    handler=browser_tools.console_errors,
+                    allowed_callers={"baseline", "browser"},
+                )
+            )
         except Exception as e:
             if playwright_ctx:
                 try:

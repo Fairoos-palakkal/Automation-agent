@@ -122,6 +122,17 @@ DEFAULT_TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "console_errors",
+            "description": "Inspect uncaught page JavaScript errors and browser console error logs.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+            },
+        },
+    },
 ]
 
 

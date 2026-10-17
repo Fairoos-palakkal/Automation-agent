@@ -18,12 +18,46 @@ class PlaywrightPageDriver:
         self.trace_writer = trace_writer
         self.denied_requests: List[str] = []
         self.console_messages: List[Dict[str, Any]] = []
+        self.failed_requests: List[Dict[str, Any]] = []
 
         if hasattr(self._page, "on"):
             self._page.on(
                 "console",
-                lambda msg: self.console_messages.append({"type": msg.type, "text": msg.text}),
+                lambda msg: self.console_messages.append({
+                    "type": getattr(msg, "type", "log"),
+                    "text": getattr(msg, "text", str(msg)),
+                }),
             )
+            self._page.on(
+                "pageerror",
+                lambda exc: self.console_messages.append({
+                    "type": "error",
+                    "text": str(exc),
+                }),
+            )
+            self._page.on(
+                "requestfailed",
+                lambda req: self.failed_requests.append({
+                    "url": getattr(req, "url", ""),
+                    "method": getattr(req, "method", "GET"),
+                    "failure": getattr(req, "failure", "Request failed"),
+                }),
+            )
+
+            def _on_response(resp: Any) -> None:
+                try:
+                    status = getattr(resp, "status", 200)
+                    if status >= 400:
+                        self.failed_requests.append({
+                            "url": getattr(resp, "url", ""),
+                            "status": status,
+                            "status_text": getattr(resp, "status_text", ""),
+                        })
+                except Exception:
+                    pass
+
+            self._page.on("response", _on_response)
+
         self._setup_route_interception()
 
     def _setup_route_interception(self) -> None:
@@ -53,6 +87,8 @@ class PlaywrightPageDriver:
                 pass
 
     def goto(self, url: str) -> Any:
+        self.console_messages.clear()
+        self.failed_requests.clear()
         return self._page.goto(url)
 
     def click(self, selector: str, timeout: float = 5000) -> Any:

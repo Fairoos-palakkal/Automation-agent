@@ -48,28 +48,51 @@ class BrowserTools:
             return self.fence.wrap(compacted)
         return compacted
 
+    def _get_errors_and_failures(self) -> Dict[str, Any]:
+        obs: Dict[str, Any] = {}
+        messages = getattr(self.driver, "console_messages", [])
+        errors = [m.get("text", "") for m in messages if m.get("type") == "error"]
+        failed_requests = list(getattr(self.driver, "failed_requests", []))
+        if errors:
+            fenced_errors = self.fence.wrap("\n".join(errors[:5])) if self.delimit else "\n".join(errors[:5])
+            obs["console_errors"] = fenced_errors
+        if failed_requests:
+            req_lines = [
+                f"{r.get('method', 'GET')} {r.get('url', '')} -> {r.get('status', r.get('failure', 'failed'))}"
+                for r in failed_requests[:5]
+            ]
+            fenced_failed = self.fence.wrap("\n".join(req_lines)) if self.delimit else "\n".join(req_lines)
+            obs["failed_requests"] = fenced_failed
+        return obs
+
     def navigate(self, url: str) -> Dict[str, Any]:
         self.driver.goto(url)
         content = self.driver.content()
-        return {
+        res = {
             "url": getattr(self.driver, "url", url),
             "snapshot": self._format_snapshot(content),
         }
+        res.update(self._get_errors_and_failures())
+        return res
 
     def click(self, selector: str) -> Dict[str, Any]:
         self.driver.click(selector)
         content = self.driver.content()
-        return {
+        res = {
             "url": getattr(self.driver, "url", ""),
             "snapshot": self._format_snapshot(content),
         }
+        res.update(self._get_errors_and_failures())
+        return res
 
     def fill(self, selector: str, value: str) -> Dict[str, Any]:
         self.driver.fill(selector, value)
         content = self.driver.content()
-        return {
+        res = {
             "snapshot": self._format_snapshot(content),
         }
+        res.update(self._get_errors_and_failures())
+        return res
 
     def screenshot(self, path: str = "artifacts/screenshot.png") -> Evidence:
         saved_path = self.driver.screenshot(path)
@@ -80,7 +103,10 @@ class BrowserTools:
 
     def console_errors(self) -> List[Dict[str, Any]]:
         messages = getattr(self.driver, "console_messages", [])
-        return [m for m in messages if m.get("type") == "error"]
+        errors = [m for m in messages if m.get("type") == "error"]
+        if self.delimit:
+            return [{"type": "error", "text": self.fence.strip_breakout(m.get("text", ""))} for m in errors]
+        return errors
 
     def snapshot(self) -> str:
         return self._format_snapshot(self.driver.content())

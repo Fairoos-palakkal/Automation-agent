@@ -129,6 +129,17 @@ BROWSER_TOOLS: List[Dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "console_errors",
+            "description": "Inspect uncaught page JavaScript errors and browser console error logs.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+            },
+        },
+    },
 ]
 
 
