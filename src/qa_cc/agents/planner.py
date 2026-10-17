@@ -47,7 +47,7 @@ class Planner:
             "and target metadata, then decompose the objective into complementary, high-impact Tasks.\n"
             "Guidelines:\n"
             "- Balance tasks between 'browser' (for UI navigation, dismissing modals, form submissions) "
-            "and 'api' (for probing REST endpoints like /rest/... or /api/... for SQL injection, 500 errors, validation).\n"
+            "and 'api' (for probing REST endpoints for unhandled server errors, 500 status codes, or validation flaws).\n"
             "- Formulate concrete goals for each task so the agent knows what functional areas to probe.\n"
             "- Allocate generous action budgets (e.g. 15 to 25 actions per task) to allow thorough probing and verification.\n"
             "Respond ONLY with valid JSON matching the Plan schema:\n"

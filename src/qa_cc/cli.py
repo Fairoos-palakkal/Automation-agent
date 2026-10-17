@@ -22,6 +22,7 @@ from qa_cc.security.scrubber import Scrubber
 from qa_cc.tools.http import HttpTool
 from qa_cc.trace.run_state import RunState
 from qa_cc.trace.writer import TraceWriter
+from qa_cc.config.target_profile import TargetProfile
 from qa_cc.verdict.evidence import Evidence, EvidenceType, Finding
 from qa_cc.verdict.engine import VerdictEngine
 from qa_cc.verdict.replayer import Replayer
@@ -46,6 +47,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--max-actions", type=int, default=25, help="Action budget limit")
     run_parser.add_argument("--max-tokens", type=int, default=250_000, help="Total token budget limit across run")
     run_parser.add_argument("--allowlist", nargs="*", default=[], help="Additional allowed hostnames for tool access")
+    run_parser.add_argument("--profile", default=None, help="Path to Target Profile JSON file")
 
     # Score subcommand
     score_parser = subparsers.add_parser("score", help="Score findings from a completed run against ground truth")
@@ -80,6 +82,7 @@ def handle_run(args: argparse.Namespace) -> int:
     scrubber = Scrubber(secret_env_vars=["LLM_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY"])
     trace_writer = TraceWriter(trace_path, scrubber=scrubber, run_id=run_id)
     run_state = RunState(max_actions=args.max_actions, max_tokens=args.max_tokens)
+    target_profile = TargetProfile.load(args.profile) if getattr(args, "profile", None) else None
 
 
     target_parsed = urlparse(args.target)
@@ -208,7 +211,7 @@ def handle_run(args: argparse.Namespace) -> int:
                 trace_writer=trace_writer,
                 run_state=run_state,
             )
-            result = orchestrator.run(objective=args.objective, target=args.target)
+            result = orchestrator.run(objective=args.objective, target=args.target, target_profile=target_profile)
             result.is_mock = True
         else:
             # Baseline single-agent mock
@@ -258,6 +261,7 @@ def handle_run(args: argparse.Namespace) -> int:
                 gateway=gateway,
                 run_state=run_state,
                 trace_writer=trace_writer,
+                target_profile=target_profile,
             )
             result = agent.run(objective=args.objective, target=args.target)
             result.is_mock = True
@@ -345,13 +349,14 @@ def handle_run(args: argparse.Namespace) -> int:
                 trace_writer=trace_writer,
                 run_state=run_state,
             )
-            result = orchestrator.run(objective=args.objective, target=args.target)
+            result = orchestrator.run(objective=args.objective, target=args.target, target_profile=target_profile)
         else:
             agent = BaselineAgent(
                 llm_client=client,
                 gateway=gateway,
                 run_state=run_state,
                 trace_writer=trace_writer,
+                target_profile=target_profile,
             )
             result = agent.run(objective=args.objective, target=args.target)
 

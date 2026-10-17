@@ -138,6 +138,7 @@ class BaselineAgent:
         verdict_engine: Optional[VerdictEngine] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
         step_log: Optional[StepLog] = None,
+        target_profile: Optional[Any] = None,
     ):
         self.client = llm_client
         self.gateway = gateway
@@ -147,6 +148,7 @@ class BaselineAgent:
         self.trace_writer = trace_writer
         self.verdict_engine = verdict_engine if verdict_engine is not None else VerdictEngine()
         self.tools = tools if tools is not None else DEFAULT_TOOLS
+        self.target_profile = target_profile
         self._loop_recovery_triggered = False
 
     def run(self, objective: str, target: str, max_turns: int = 25) -> RunResult:
@@ -157,10 +159,16 @@ class BaselineAgent:
             "Guidelines:\n"
             "- Interact with the application like a user: click buttons, click navigation links, and fill forms.\n"
             "- Do not navigate directly to static code assets (.js, .css). Explore through HTML pages and UI controls.\n"
-            "- If a cookie consent banner or welcome modal overlays the page (e.g. 'Me want it!', 'Dismiss', close button), click to dismiss it so the underlying forms and navigation buttons become interactive.\n"
-            "- If a feature mentioned in the objective (e.g. login) does not exist in the site navigation, proceed to test the features that do exist.\n"
-            "- Whenever you observe a bug (stale totals, broken calculations, missing validation, 404 on linked pages), immediately call report_finding with evidence before concluding."
+            "- If an overlay, modal dialog, or banner covers interactive elements, dismiss it so page controls become accessible.\n"
+            "- If a feature mentioned in the objective is absent, thoroughly test all available navigation paths and controls.\n"
+            "- Whenever you observe unexpected behavior (unhandled exceptions, HTTP errors, broken form submission, or state inconsistencies), immediately call report_finding with evidence before concluding."
         )
+
+        extra_content = None
+        if self.target_profile and hasattr(self.target_profile, "format_for_prompt"):
+            profile_hint = self.target_profile.format_for_prompt()
+            if profile_hint:
+                extra_content = f"Target Profile Context:\n{profile_hint}"
 
         loop = AgentLoop(
             client=self.client,
@@ -173,8 +181,14 @@ class BaselineAgent:
             loop_detector=self.loop_detector,
             verdict_engine=self.verdict_engine,
             agent_name="baseline",
+            target_profile=self.target_profile,
         )
-        loop_result = loop.run(objective=objective, target=target, max_turns=max_turns)
+        loop_result = loop.run(
+            objective=objective,
+            target=target,
+            max_turns=max_turns,
+            extra_user_content=extra_content,
+        )
         self._loop_recovery_triggered = loop_result.loop_recovery_triggered
         return loop_result.to_run_result()
 

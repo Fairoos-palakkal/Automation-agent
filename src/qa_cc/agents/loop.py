@@ -91,6 +91,7 @@ class AgentLoop:
         agent_name: str = "baseline",
         task_id: Optional[str] = None,
         finding_handler: Optional[Callable[..., Finding]] = None,
+        target_profile: Optional[Any] = None,
     ) -> None:
         self.client = client
         self.gateway = gateway
@@ -104,6 +105,7 @@ class AgentLoop:
         self.agent_name = agent_name
         self.task_id = task_id
         self.finding_handler = finding_handler
+        self.target_profile = target_profile
         self._loop_recovery_triggered = False
 
     def run(
@@ -116,7 +118,11 @@ class AgentLoop:
     ) -> AgentLoopResult:
         """Execute the agent loop up to max_turns."""
         if messages is None:
-            user_content = extra_user_content or f"Objective: {objective}\nTarget URL: {target}"
+            base_content = f"Objective: {objective}\nTarget URL: {target}" if (objective or target) else ""
+            if extra_user_content:
+                user_content = f"{base_content}\n\n{extra_user_content}".strip() if base_content else extra_user_content
+            else:
+                user_content = base_content
             messages = [
                 {"role": "system", "content": self.system_prompt},
                 {"role": "user", "content": user_content},
@@ -135,6 +141,7 @@ class AgentLoop:
                 "target": target,
                 "model_id": getattr(getattr(self.client, "provider", None), "model", "unknown"),
                 "tokens": 0,
+                "target_profile": self.target_profile.to_dict() if self.target_profile and hasattr(self.target_profile, "to_dict") else None,
             })
 
         for _ in range(max_turns):

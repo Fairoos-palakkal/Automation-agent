@@ -44,6 +44,7 @@ class Orchestrator:
         target: str,
         target_metadata: Optional[Dict[str, Any]] = None,
         max_replans: int = 2,
+        target_profile: Optional[Any] = None,
     ) -> RunResult:
         """Run the multi-agent QA exploration loop."""
         if self.trace_writer:
@@ -52,6 +53,7 @@ class Orchestrator:
                 "objective": objective,
                 "target": target,
                 "max_replans": max_replans,
+                "target_profile": target_profile.to_dict() if target_profile and hasattr(target_profile, "to_dict") else None,
             })
 
         total_budget = {
@@ -60,9 +62,13 @@ class Orchestrator:
         }
 
         # Step 1: Initial planning
+        merged_metadata = dict(target_metadata or {})
+        if target_profile:
+            merged_metadata["target_profile"] = target_profile.to_dict() if hasattr(target_profile, "to_dict") else target_profile
+
         plan: Plan = self.planner.plan(
             objective=objective,
-            target_metadata=target_metadata or {},
+            target_metadata=merged_metadata,
             total_budget=total_budget,
         )
 
