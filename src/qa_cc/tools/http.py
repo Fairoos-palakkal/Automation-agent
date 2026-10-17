@@ -70,6 +70,10 @@ class HttpTool:
                             current_headers["Content-Type"] = "application/json"
                     elif isinstance(current_body, str):
                         data = current_body.encode("utf-8")
+                        if "content-type" not in [k.lower() for k in current_headers]:
+                            stripped = current_body.strip()
+                            if (stripped.startswith("{") and stripped.endswith("}")) or (stripped.startswith("[") and stripped.endswith("]")):
+                                current_headers["Content-Type"] = "application/json"
                     elif isinstance(current_body, bytes):
                         data = current_body
 

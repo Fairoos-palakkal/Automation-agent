@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import json
+import re
 from typing import Any, Callable, Dict, List, Optional
 
 from qa_cc.agents.loop_detector import (
@@ -145,7 +146,8 @@ class AgentLoop:
                 break
 
             try:
-                response = self.client.chat(messages, tools=self.tools)
+                pruned_messages = self._prune_historical_snapshots(messages)
+                response = self.client.chat(pruned_messages, tools=self.tools)
             except Exception as e:
                 status = "llm_error"
                 summary = f"LLM error: {e}"
@@ -323,6 +325,30 @@ class AgentLoop:
             steps=self.step_log.get_step_dicts(),
             step_log=self.step_log,
         )
+
+    def _prune_historical_snapshots(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Keep only the most recent DOM snapshot in conversation history to prevent token explosion."""
+        dom_indices = []
+        for idx, m in enumerate(messages):
+            if m.get("role") == "tool" and "<UNTRUSTED_DOM_CONTENT>" in str(m.get("content", "")):
+                dom_indices.append(idx)
+
+        if len(dom_indices) <= 1:
+            return messages
+
+        pruned = []
+        for idx, m in enumerate(messages):
+            if idx in dom_indices[:-1]:
+                content = str(m.get("content", ""))
+                compact_content = re.sub(
+                    r"<UNTRUSTED_DOM_CONTENT>[\s\S]*?</UNTRUSTED_DOM_CONTENT>",
+                    "<UNTRUSTED_DOM_CONTENT>[DOM snapshot pruned; latest state available in subsequent turn]</UNTRUSTED_DOM_CONTENT>",
+                    content,
+                )
+                pruned.append({**m, "content": compact_content})
+            else:
+                pruned.append(m)
+        return pruned
 
     def _create_finding(self, args: Dict[str, Any], current_url: str) -> Finding:
         summary = args.get("summary", "API Defect discovered" if self.agent_name == "api" else "Defect discovered")
