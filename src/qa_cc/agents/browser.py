@@ -37,6 +37,7 @@ class TaskResult:
     tokens_used: int = 0
     budget_exceeded: bool = False
     loop_recovery_triggered: bool = False
+    step_log: Optional[StepLog] = None
 
 
 BROWSER_TOOLS: List[Dict[str, Any]] = [
@@ -145,19 +146,27 @@ class BrowserAgent:
         trace_writer: Optional[TraceWriter] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
         loop_detector: Optional[LoopDetector] = None,
+        step_log: Optional[StepLog] = None,
     ):
         self.client = llm_client
         self.gateway = gateway
         self.trace_writer = trace_writer
         self.tools = tools if tools is not None else BROWSER_TOOLS
         self.loop_detector = loop_detector or LoopDetector(threshold=3)
+        self.step_log = step_log
 
-    def execute(self, task: Task, target_url: str = "", max_turns: int = 25) -> TaskResult:
+    def execute(
+        self,
+        task: Task,
+        target_url: str = "",
+        max_turns: int = 25,
+        step_log: Optional[StepLog] = None,
+    ) -> TaskResult:
         """Execute a browser task under its own dedicated budget and context."""
         max_actions = task.budget.get("max_actions", 25)
         max_tokens = task.budget.get("max_tokens", 100_000)
         run_state = RunState(max_actions=max_actions, max_tokens=max_tokens)
-        step_log = StepLog()
+        active_step_log = step_log or self.step_log or StepLog()
 
         system_prompt = (
             "You are an isolated Browser QA Agent. Your mission is to accomplish the assigned Task goal "
@@ -183,7 +192,7 @@ class BrowserAgent:
             tools=self.tools,
             system_prompt=system_prompt,
             run_state=run_state,
-            step_log=step_log,
+            step_log=active_step_log,
             trace_writer=self.trace_writer,
             loop_detector=self.loop_detector,
             agent_name="browser",

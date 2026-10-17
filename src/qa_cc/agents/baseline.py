@@ -30,6 +30,7 @@ class RunResult:
     summary: str = ""
     is_mock: bool = False
     status: str = "completed"
+    step_log: Optional[StepLog] = None
 
 
 DEFAULT_TOOLS = [

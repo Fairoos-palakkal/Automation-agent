@@ -18,6 +18,7 @@ class VerdictType(str, Enum):
     FAIL = "FAIL"
     INCONCLUSIVE = "INCONCLUSIVE"
     FLAKY = "FLAKY"
+    PASS_AFTER_RETRY = "PASS_AFTER_RETRY"
 
 
 class Evidence(BaseModel):

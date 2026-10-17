@@ -3,11 +3,28 @@
 Establishes ground truth verdicts (PASS, FAIL, INCONCLUSIVE, FLAKY) using deterministic checks only.
 CRITICAL INVARIANT: Contains NO LLM dependencies or evaluation agents.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Union
+from urllib.parse import urlsplit, urlunsplit
 
+from bs4 import BeautifulSoup
 from qa_cc.verdict.evidence import Verdict, VerdictType
+
+
+def normalize_url(url: str) -> str:
+    """Normalize a URL by trimming trailing slashes on paths and standardizing components."""
+    if not url:
+        return ""
+    try:
+        parts = urlsplit(url)
+        path = parts.path
+        if path.endswith("/") and len(path) > 1:
+            path = path.rstrip("/")
+        netloc = parts.netloc.lower()
+        return urlunsplit((parts.scheme.lower(), netloc, path, parts.query, parts.fragment))
+    except Exception:
+        return url.rstrip("/")
 
 
 @dataclass
@@ -16,6 +33,16 @@ class AssertionRule:
     selector: Optional[str] = None
     expected: Optional[str] = None
     pattern: Optional[str] = None
+    status_code: Optional[int] = None
+
+
+BENIGN_CONSOLE_PATTERNS = [
+    r"favicon\.ico",
+    r"\[HMR\]",
+    r"\[vite\]",
+    r"webpack",
+    r"DevTools failed to load source map",
+]
 
 
 class VerdictEngine:
@@ -25,19 +52,38 @@ class VerdictEngine:
         html = page_state.get("html", "")
         url = page_state.get("url", "")
         console_errors = page_state.get("console_errors", [])
+        status_code = page_state.get("status_code")
 
-        # Guard against ambiguous / empty page state
-        if not html and not url and not console_errors:
+        # Guard against completely ambiguous / empty page state
+        if not html and not url and not console_errors and status_code is None:
             return Verdict(
                 type=VerdictType.INCONCLUSIVE,
                 reason="Page state is empty or uninitialized.",
             )
 
-        if rule.rule_type == "url_equals":
-            if url == rule.expected:
+        if rule.rule_type == "status_code":
+            if status_code is None:
+                return Verdict(
+                    type=VerdictType.INCONCLUSIVE,
+                    reason="Status code not available in page state.",
+                )
+            if status_code == rule.status_code:
                 return Verdict(
                     type=VerdictType.PASS,
-                    reason=f"URL '{url}' matches expected URL.",
+                    reason=f"Status code {status_code} matches expected {rule.status_code}.",
+                )
+            return Verdict(
+                type=VerdictType.FAIL,
+                reason=f"Status code {status_code} does not match expected {rule.status_code}.",
+            )
+
+        if rule.rule_type == "url_equals":
+            norm_actual = normalize_url(url)
+            norm_expected = normalize_url(rule.expected or "")
+            if norm_actual == norm_expected:
+                return Verdict(
+                    type=VerdictType.PASS,
+                    reason=f"URL '{url}' matches expected URL '{rule.expected}'.",
                 )
             return Verdict(
                 type=VerdictType.FAIL,
@@ -45,34 +91,65 @@ class VerdictEngine:
             )
 
         if rule.rule_type == "no_console_errors":
-            pattern = rule.pattern or ".*"
+            pattern = rule.pattern
             for err in console_errors:
-                err_text = err if isinstance(err, str) else err.get("text", "")
-                if re.search(pattern, err_text):
-                    return Verdict(
-                        type=VerdictType.FAIL,
-                        reason=f"Console error matched pattern '{pattern}': {err_text}",
-                        details={"error": err_text},
-                    )
+                if isinstance(err, dict):
+                    err_text = err.get("text", "")
+                    err_type = err.get("type", "error")
+                    if err_type in ("log", "info", "debug", "dir"):
+                        continue
+                else:
+                    err_text = str(err)
+
+                # Skip benign noise unless specifically targeted by an explicit pattern
+                is_benign = any(re.search(bp, err_text, re.IGNORECASE) for bp in BENIGN_CONSOLE_PATTERNS)
+                if is_benign and (not pattern or "favicon" not in pattern.lower()):
+                    continue
+
+                if pattern and pattern != ".*":
+                    if re.search(pattern, err_text):
+                        return Verdict(
+                            type=VerdictType.FAIL,
+                            reason=f"Console error matched pattern '{pattern}': {err_text}",
+                            details={"error": err_text},
+                        )
+                else:
+                    # Treat any non-benign error message as failure
+                    if "error" in err_text.lower() or "uncaught" in err_text.lower() or "exception" in err_text.lower():
+                        return Verdict(
+                            type=VerdictType.FAIL,
+                            reason=f"Uncaught console error detected: {err_text}",
+                            details={"error": err_text},
+                        )
+
             return Verdict(
                 type=VerdictType.PASS,
                 reason="No console errors matched failure pattern.",
             )
 
-        # For element rules, if html is completely blank, return INCONCLUSIVE
-        if not html.strip():
+        # Element rules require non-blank HTML
+        if not html or not html.strip():
             return Verdict(
                 type=VerdictType.INCONCLUSIVE,
                 reason="HTML body is empty.",
             )
 
-        selector_id = None
-        if rule.selector and rule.selector.startswith("#"):
-            selector_id = rule.selector[1:]
+        soup = BeautifulSoup(html, "html.parser")
+        selector = (rule.selector or "").strip()
 
         if rule.rule_type == "element_exists":
-            pattern = rf'id=["\']{selector_id}["\']' if selector_id else re.escape(rule.selector or "")
-            if re.search(pattern, html):
+            matched = False
+            if selector:
+                try:
+                    elements = soup.select(selector)
+                    matched = len(elements) > 0
+                except Exception:
+                    # Fallback for simple ID selectors if CSS parser errors
+                    if selector.startswith("#"):
+                        matched = soup.find(id=selector[1:]) is not None
+                    else:
+                        matched = selector in html
+            if matched:
                 return Verdict(
                     type=VerdictType.PASS,
                     reason=f"Element '{rule.selector}' exists in page.",
@@ -83,30 +160,34 @@ class VerdictEngine:
             )
 
         if rule.rule_type == "element_contains_text":
-            pattern = (
-                rf'id=["\']{selector_id}["\'][^>]*>(.*?)<\/'
-                if selector_id
-                else rf"{re.escape(rule.selector or '')}[^>]*>(.*?)<\/"
-            )
-            match = re.search(pattern, html, flags=re.DOTALL)
-            if not match:
-                # Check if element exists at all
-                elem_pat = rf'id=["\']{selector_id}["\']' if selector_id else re.escape(rule.selector or "")
-                if not re.search(elem_pat, html):
+            elements = []
+            if selector:
+                try:
+                    elements = soup.select(selector)
+                except Exception:
+                    if selector.startswith("#"):
+                        el = soup.find(id=selector[1:])
+                        if el:
+                            elements = [el]
+
+                if not elements:
                     return Verdict(
                         type=VerdictType.FAIL,
                         reason=f"Element '{rule.selector}' not found in page.",
                     )
-                # Found element, extract inner content
-                elem_text = html
             else:
-                elem_text = match.group(1)
+                elements = [soup]
 
-            if rule.expected and rule.expected in elem_text:
-                return Verdict(
-                    type=VerdictType.PASS,
-                    reason=f"Element '{rule.selector}' matched expected text '{rule.expected}'.",
-                )
+            expected = rule.expected or ""
+            # Inspect full inner text across nested DOM children
+            for el in elements:
+                full_text = el.get_text()
+                if expected in full_text:
+                    return Verdict(
+                        type=VerdictType.PASS,
+                        reason=f"Element '{rule.selector}' matched expected text '{rule.expected}'.",
+                    )
+
             return Verdict(
                 type=VerdictType.FAIL,
                 reason=f"Element '{rule.selector}' did not contain expected text '{rule.expected}'.",
@@ -116,3 +197,44 @@ class VerdictEngine:
             type=VerdictType.INCONCLUSIVE,
             reason=f"Unrecognized rule type '{rule.rule_type}'.",
         )
+
+    def evaluate_with_retry(
+        self,
+        rule: AssertionRule,
+        page_state: Optional[Dict[str, Any]] = None,
+        state_fn: Optional[Callable[[], Dict[str, Any]]] = None,
+        states: Optional[List[Dict[str, Any]]] = None,
+        retries: int = 3,
+    ) -> Verdict:
+        """Evaluate an AssertionRule across multiple states or invocations to detect FLAKY behavior."""
+        verdicts: List[Verdict] = []
+
+        if states is not None:
+            for s in states[:retries]:
+                verdicts.append(self.evaluate(rule, s))
+        elif state_fn is not None:
+            for _ in range(retries):
+                verdicts.append(self.evaluate(rule, state_fn()))
+        elif page_state is not None:
+            for _ in range(retries):
+                verdicts.append(self.evaluate(rule, page_state))
+        else:
+            return Verdict(type=VerdictType.INCONCLUSIVE, reason="No page state or state provider supplied for retry.")
+
+        if not verdicts:
+            return Verdict(type=VerdictType.INCONCLUSIVE, reason="No retry evaluations were executed.")
+
+        types = [v.type for v in verdicts]
+        unique_types = set(types)
+
+        if len(unique_types) == 1:
+            return verdicts[0]
+
+        # Inconsistent retry outcomes are labeled FLAKY
+        reasons = [f"Attempt {i+1}: {v.type.value} ({v.reason})" for i, v in enumerate(verdicts)]
+        return Verdict(
+            type=VerdictType.FLAKY,
+            reason=f"Assertion was inconsistent across retries: {[t.value for t in types]} (FLAKY)",
+            details={"history": [t.value for t in types], "attempts": reasons},
+        )
+

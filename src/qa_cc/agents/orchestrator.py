@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional
 
 from qa_cc.agents.baseline import RunResult
 from qa_cc.agents.plan import AgentType, Plan, Task
+from qa_cc.agents.step_log import StepLog
 from qa_cc.trace.run_state import RunState
 from qa_cc.trace.writer import TraceWriter
 from qa_cc.verdict.evidence import Finding
@@ -28,12 +29,14 @@ class Orchestrator:
         api_agent: Any,
         trace_writer: Optional[TraceWriter] = None,
         run_state: Optional[RunState] = None,
+        step_log: Optional[StepLog] = None,
     ):
         self.planner = planner
         self.browser_agent = browser_agent
         self.api_agent = api_agent
         self.trace_writer = trace_writer
         self.run_state = run_state or RunState()
+        self.step_log = step_log or StepLog()
 
     def run(
         self,
@@ -87,11 +90,11 @@ class Orchestrator:
 
             assignee_val = task.assignee.value if hasattr(task.assignee, "value") else str(task.assignee)
             if assignee_val == AgentType.BROWSER.value:
-                task_result = self.browser_agent.execute(task, target_url=target)
+                task_result = self.browser_agent.execute(task, target_url=target, step_log=self.step_log)
             elif assignee_val == AgentType.API.value:
-                task_result = self.api_agent.execute(task, base_url=target)
+                task_result = self.api_agent.execute(task, base_url=target, step_log=self.step_log)
             else:
-                task_result = self.browser_agent.execute(task, target_url=target)
+                task_result = self.browser_agent.execute(task, target_url=target, step_log=self.step_log)
 
             total_actions += getattr(task_result, "actions_count", 0)
             total_tokens += getattr(task_result, "tokens_used", 0)
@@ -140,4 +143,5 @@ class Orchestrator:
             loop_recovery_triggered=False,
             trace_path=str(self.trace_writer._path) if self.trace_writer else None,
             summary=f"Orchestrated multi-agent run completed: {len(all_findings)} findings",
+            step_log=self.step_log,
         )

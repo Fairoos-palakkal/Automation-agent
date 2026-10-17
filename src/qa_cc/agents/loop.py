@@ -40,6 +40,7 @@ class AgentLoopResult:
     summary: str = ""
     status: str = "completed"  # completed, llm_error, tool_error, invalid_args, budget_exceeded, failed
     steps: List[Dict[str, Any]] = field(default_factory=list)
+    step_log: Optional[StepLog] = None
 
     def to_run_result(self, is_mock: bool = False):
         from qa_cc.agents.baseline import RunResult
@@ -53,6 +54,7 @@ class AgentLoopResult:
             summary=self.summary,
             is_mock=is_mock,
             status=self.status,
+            step_log=self.step_log,
         )
 
     def to_task_result(self, task_id: str):
@@ -67,6 +69,7 @@ class AgentLoopResult:
             tokens_used=self.tokens_used,
             budget_exceeded=self.budget_exceeded,
             loop_recovery_triggered=self.loop_recovery_triggered,
+            step_log=self.step_log,
         )
 
 
@@ -318,6 +321,7 @@ class AgentLoop:
             summary=summary or f"{self.agent_name.capitalize()} execution finished",
             status=status,
             steps=self.step_log.get_step_dicts(),
+            step_log=self.step_log,
         )
 
     def _create_finding(self, args: Dict[str, Any], current_url: str) -> Finding:
