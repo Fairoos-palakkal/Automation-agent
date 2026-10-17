@@ -31,6 +31,60 @@ def compact_snapshot(html: str, max_chars: int = 25000) -> str:
     return cleaned
 
 
+def extract_interactive_elements(html: str, max_chars: int = 4000) -> str:
+    """Extract interactive elements (links, buttons, inputs, selects, forms) as a compact index."""
+    if not html:
+        return ""
+    try:
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(html, "html.parser")
+    except Exception:
+        return compact_snapshot(html, max_chars=max_chars)
+
+    title_tag = soup.find("title")
+    title_str = title_tag.get_text(strip=True) if title_tag else ""
+    lines = []
+    if title_str:
+        lines.append(f"Page Title: {title_str}")
+    lines.append("Interactive Elements:")
+
+    interactive_tags = soup.find_all(["a", "button", "input", "select", "textarea", "form"])
+    for el in interactive_tags:
+        tag_name = el.name.lower()
+        parts = [f"- <{tag_name}"]
+
+        if el.get("id"):
+            parts.append(f"id='{el['id']}'")
+        if el.get("name"):
+            parts.append(f"name='{el['name']}'")
+        if el.get("type"):
+            parts.append(f"type='{el['type']}'")
+        if el.get("href"):
+            parts.append(f"href='{el['href']}'")
+        if el.get("action"):
+            parts.append(f"action='{el['action']}'")
+        if el.get("placeholder"):
+            parts.append(f"placeholder='{el['placeholder']}'")
+        if el.get("value") and tag_name in ("input", "button"):
+            parts.append(f"value='{el['value']}'")
+        if el.get("aria-label"):
+            parts.append(f"aria-label='{el['aria-label']}'")
+
+        text = el.get_text(strip=True)
+        if text and len(text) < 80:
+            parts.append(f"text='{text}'")
+        elif text:
+            parts.append(f"text='{text[:75]}...'")
+
+        line = " ".join(parts) + ">"
+        lines.append(line)
+
+    result = "\n".join(lines)
+    if len(result) > max_chars:
+        result = result[:max_chars - 30] + "\n[... truncated]"
+    return result
+
+
 from qa_cc.security.fence import ContentFence, delimit_dom_content
 
 
@@ -43,10 +97,12 @@ class BrowserTools:
         self.fence = fence or ContentFence()
 
     def _format_snapshot(self, content: str) -> str:
-        compacted = compact_snapshot(content)
+        interactive_index = extract_interactive_elements(content, max_chars=2000)
+        compacted = compact_snapshot(content, max_chars=2000)
+        formatted = f"{interactive_index}\n\n[DOM Structure]:\n{compacted}" if interactive_index else compacted
         if self.delimit:
-            return self.fence.wrap(compacted)
-        return compacted
+            return self.fence.wrap(formatted)
+        return formatted
 
     def _get_errors_and_failures(self) -> Dict[str, Any]:
         obs: Dict[str, Any] = {}

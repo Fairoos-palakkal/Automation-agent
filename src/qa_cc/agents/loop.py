@@ -144,7 +144,15 @@ class AgentLoop:
                 "target_profile": self.target_profile.to_dict() if self.target_profile and hasattr(self.target_profile, "to_dict") else None,
             })
 
-        for _ in range(max_turns):
+        self.run_state.start_timer()
+        derived_turns = self.run_state.remaining_turns(default_max=max_turns)
+        turns_to_run = min(max_turns, derived_turns)
+
+        if turns_to_run <= 0:
+            status = "budget_exceeded"
+            budget_exceeded = True
+
+        for _ in range(turns_to_run):
             try:
                 self.run_state.check_budget()
             except BudgetExceeded:
@@ -153,6 +161,8 @@ class AgentLoop:
                 break
 
             try:
+                self.run_state.record_model_call()
+                self.run_state.check_budget()
                 pruned_messages = self._prune_historical_snapshots(messages)
                 response = self.client.chat(pruned_messages, tools=self.tools)
             except Exception as e:
@@ -320,6 +330,16 @@ class AgentLoop:
             if finished:
                 break
 
+        if (
+            budget_exceeded
+            or self.run_state.action_count >= self.run_state.max_actions
+            or self.run_state.token_count > self.run_state.max_tokens
+            or (self.run_state.max_model_calls is not None and self.run_state.model_calls_count >= self.run_state.max_model_calls)
+        ):
+            budget_exceeded = True
+            if status == "completed":
+                status = "budget_exceeded"
+
         return AgentLoopResult(
             findings=self.run_state.findings,
             actions_count=self.run_state.actions_count,
@@ -334,25 +354,36 @@ class AgentLoop:
         )
 
     def _prune_historical_snapshots(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Keep only the most recent DOM snapshot in conversation history to prevent token explosion."""
-        dom_indices = []
-        for idx, m in enumerate(messages):
-            if m.get("role") == "tool" and "<UNTRUSTED_DOM_CONTENT>" in str(m.get("content", "")):
-                dom_indices.append(idx)
-
-        if len(dom_indices) <= 1:
+        """Keep only the most recent tool observation in full; compact older tool results to one-line summaries."""
+        tool_indices = [idx for idx, m in enumerate(messages) if m.get("role") == "tool"]
+        if len(tool_indices) <= 1:
             return messages
 
+        latest_idx = tool_indices[-1]
         pruned = []
         for idx, m in enumerate(messages):
-            if idx in dom_indices[:-1]:
-                content = str(m.get("content", ""))
-                compact_content = re.sub(
-                    r"<UNTRUSTED_DOM_CONTENT>[\s\S]*?</UNTRUSTED_DOM_CONTENT>",
-                    "<UNTRUSTED_DOM_CONTENT>[DOM snapshot pruned; latest state available in subsequent turn]</UNTRUSTED_DOM_CONTENT>",
-                    content,
-                )
-                pruned.append({**m, "content": compact_content})
+            if idx in tool_indices and idx != latest_idx:
+                tool_name = m.get("name", "action")
+                content_str = str(m.get("content", ""))
+                summary_snippet = ""
+                try:
+                    parsed = json.loads(content_str)
+                    if isinstance(parsed, dict):
+                        if "url" in parsed:
+                            summary_snippet = f"url: {parsed['url']}"
+                        elif "status_code" in parsed:
+                            summary_snippet = f"status: {parsed['status_code']}"
+                        elif "status" in parsed:
+                            summary_snippet = f"status: {parsed['status']}"
+                except Exception:
+                    pass
+                if not summary_snippet and len(content_str) > 80:
+                    summary_snippet = content_str[:70] + "..."
+                elif not summary_snippet:
+                    summary_snippet = content_str
+
+                one_line_summary = f"[Step result: {tool_name} executed successfully. {summary_snippet}]"
+                pruned.append({**m, "content": one_line_summary})
             else:
                 pruned.append(m)
         return pruned
